@@ -92,3 +92,37 @@ python3 examples/7_custom_observations.py --obs dynamics  # See vehicle dynamic 
 python3 examples/7_custom_observations.py --obs track     # See track geometry
 python3 examples/7_custom_observations.py --eval --render  # Watch
 ```
+
+### Example 8: Actuator Model + Curriculum Learning (`8_actuator_curriculum_learning.py`)
+**What you'll learn:** Sim-to-real transfer with learned dynamics, progressive difficulty curriculum.
+
+This is the full closed-loop learning pipeline. The agent learns with a neural network model of real actuator dynamics (predicting how the real car responds to steering commands) and progressively increases speed and reduces safety margins as training progresses. This bridges the reality gap between simulation and the physical robot.
+
+Workflow:
+1. Train RL policy in simulation
+2. Deploy to robot, collect actuator data
+3. Train dynamics model offline
+4. Retrain RL policy with dynamics model (this example)
+5. Deploy improved policy back to robot
+
+```bash
+# With trained actuator model and curriculum
+python3 examples/8_actuator_curriculum_learning.py
+
+# Or use command-line directly:
+python3 scripts/train.py \
+  --actuator-model path/to/actuator_net.pth \
+  --actuator-scaler-X path/to/scaler_X.pkl \
+  --actuator-scaler-y path/to/scaler_y.pkl \
+  --curriculum \
+  --curriculum-steps-per-phase 100000 \
+  --total-steps 1200000
+```
+
+Key features:
+- Optional actuator dynamics model (gracefully degrades if not available)
+- Automatic curriculum progression (speed & safety margin schedules)
+- Full closed-loop integration with robot data collection
+- Logging of curriculum phase and difficulty metrics
+
+See [ACTUATOR_CURRICULUM_GUIDE.md](../ACTUATOR_CURRICULUM_GUIDE.md) for detailed documentation.

@@ -88,6 +88,24 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to run directory or checkpoint to resume")
 
+    # Actuator model for sim-to-real transfer
+    parser.add_argument("--actuator-model", type=str, default=None,
+                        help="Path to trained actuator model (.pth or .pt)")
+    parser.add_argument("--actuator-scaler-X", type=str, default=None,
+                        help="Path to joblib StandardScaler for actuator model inputs")
+    parser.add_argument("--actuator-scaler-y", type=str, default=None,
+                        help="Path to joblib StandardScaler for actuator model outputs")
+
+    # Curriculum learning: progressive speed & safety margin scaling
+    parser.add_argument("--curriculum", action="store_true",
+                        help="Enable curriculum learning (speed/margin progression)")
+    parser.add_argument("--curriculum-steps-per-phase", type=int, default=100000,
+                        help="Number of training steps per curriculum phase")
+    parser.add_argument("--curriculum-speeds", type=float, nargs="+", default=None,
+                        help="Speed schedule (e.g., 2.0 2.5 3.0 3.5 4.0 5.0 6.0)")
+    parser.add_argument("--curriculum-margins", type=float, nargs="+", default=None,
+                        help="Safety margin schedule (e.g., 1.5 1.2 1.0 0.8 0.6 0.4 0.3)")
+
     # Logging
     parser.add_argument("--wandb", action="store_true", default=None,
                         help="Enable WandB logging (default: from config)")
@@ -157,6 +175,28 @@ def apply_overrides(config, args):
         config["domain_randomization"]["mode"] = args.dr_mode
         if args.dr_mode != "off":
             config["domain_randomization"]["enabled"] = True
+
+    # Actuator model integration
+    if args.actuator_model:
+        if "actuator_model" not in config:
+            config["actuator_model"] = {}
+        config["actuator_model"]["model_path"] = args.actuator_model
+        if args.actuator_scaler_X:
+            config["actuator_model"]["scaler_X_path"] = args.actuator_scaler_X
+        if args.actuator_scaler_y:
+            config["actuator_model"]["scaler_y_path"] = args.actuator_scaler_y
+
+    # Curriculum learning
+    if args.curriculum:
+        if "curriculum" not in config:
+            config["curriculum"] = {}
+        config["curriculum"]["enabled"] = True
+        if args.curriculum_steps_per_phase:
+            config["curriculum"]["steps_per_phase"] = args.curriculum_steps_per_phase
+        if args.curriculum_speeds:
+            config["curriculum"]["speed_schedule"] = args.curriculum_speeds
+        if args.curriculum_margins:
+            config["curriculum"]["margin_schedule"] = args.curriculum_margins
 
     # WandB: CLI flags override config
     if args.no_wandb:
