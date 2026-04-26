@@ -329,7 +329,14 @@ def main():
     parser.add_argument("--export-onnx", action="store_true")
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--save-plot", type=str, default=None)
+    parser.add_argument("--wall-margin", type=float, default=None,
+                    help="Fixed wall proximity threshold for testing (e.g., 0.2, 0.35, 0.5)")
     args = parser.parse_args()
+
+    if args.wall_margin is not None:
+        # Fix the threshold to a specific value (disable randomization)
+        config["reward"]["wall_proximity_threshold_min"] = args.wall_margin
+        config["reward"]["wall_proximity_threshold_max"] = args.wall_margin
 
     # ---- BC model evaluation ----
     if args.bc_model:
