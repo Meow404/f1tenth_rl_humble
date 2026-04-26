@@ -39,14 +39,14 @@ experiment:
   wandb_project: "f1tenth_rl"
 
 env:
-  map_path: "maps/levine_blocked/levine_blocked"
-  map_ext: ".png"
+  map_path: "maps/levine_race2/levine_race2"
+  map_ext: ".pgm"
   num_agents: 1
   timestep: 0.01
   integrator: "rk4"
   num_envs: 8
   max_steps: 3000
-  num_laps: 1
+  num_laps: 5
 
 lidar:
   raw_beams: 1080              # Hokuyo UST-10LX

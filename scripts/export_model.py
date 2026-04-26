@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import inspect
 import os
 import sys
 import time
@@ -82,24 +83,33 @@ def export_onnx(model_path: str, config: dict, output_path: str = None):
     wrapper = PolicyWrapper(policy)
     wrapper.eval()
 
+    # Keep ONNX opset explicit for deployment compatibility (Jetson often expects opset 11).
+    onnx_opset = int(config.get("deployment", {}).get("onnx_opset", 11))
+
     # Export
     if output_path is None:
         output_path = model_path.replace(".zip", "") + ".onnx"
 
     dummy_input = torch.randn(1, obs_dim, dtype=torch.float32)
 
-    torch.onnx.export(
-        wrapper,
-        dummy_input,
-        output_path,
-        opset_version=11,
-        input_names=["observation"],
-        output_names=["action"],
-        dynamic_axes={
+    export_kwargs = {
+        "opset_version": onnx_opset,
+        "input_names": ["observation"],
+        "output_names": ["action"],
+        "dynamic_axes": {
             "observation": {0: "batch_size"},
             "action": {0: "batch_size"},
         },
-    )
+    }
+
+    # Newer PyTorch defaults to dynamo exporter, which may emit noisy/failing
+    # version-conversion fallbacks when targeting lower opsets. Prefer legacy
+    # exporter when supported to preserve stable opset-11 exports.
+    export_sig = inspect.signature(torch.onnx.export)
+    if "dynamo" in export_sig.parameters:
+        export_kwargs["dynamo"] = False
+
+    torch.onnx.export(wrapper, dummy_input, output_path, **export_kwargs)
 
     # Verify
     file_size = os.path.getsize(output_path) / 1024
