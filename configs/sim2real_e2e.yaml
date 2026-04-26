@@ -55,14 +55,14 @@ experiment:
   wandb_project: "f1tenth_rl"
 
 env:
-  map_path: "maps/levine_race2/levine_race2"
-  map_ext: ".pgm"
+  map_path: "maps/levine_race/levine_race2"
+  map_ext: ".png"
   num_agents: 1
   timestep: 0.01
   integrator: "rk4"
   num_envs: 8
   max_steps: 3000
-  num_laps: 5
+  num_laps: 1
 
 lidar:
   raw_beams: 1080              # Hokuyo UST-10LX
@@ -79,15 +79,16 @@ observation:
   include_steering: false
   include_prev_action: true
   frame_stack: 1               # Don't stack frames — timing differs on real car
+  include_wall_threshold: true
 
 action:
   type: "continuous"
-  max_speed: 3.0               # Conservative for real car. Increase after it works.
+  max_speed: 3.5               # Conservative for real car. Increase after it works.
   min_speed: 0.5
   max_steer: 0.4189
   smoothing_alpha: 0.3         # Heavy smoothing prevents servo jitter on real car
-  steer_dead_zone: 0.0         # OFF during training (used on real car only)
-  max_steer_rate: 0.0          # OFF during training (0 = unlimited)
+  steer_dead_zone: 0.005         # OFF during training (used on real car only)
+  max_steer_rate: 0.5          # OFF during training (0 = unlimited)
 
 reward:
   type: "cth"                  # Cross-track + heading → smoother than "progress"
@@ -96,8 +97,9 @@ reward:
   heading_weight: 0.2          # Reward pointing along the track
   crosstrack_weight: 0.1       # Penalty for drifting from centerline
   steering_change_penalty: 0.5 # Penalize jerky steering (smooth is critical for real car)
-  wall_proximity_penalty: 0.5  # Gentle nudge away from walls
-  wall_proximity_threshold: 0.3 # Only penalize within 30cm of walls
+  wall_proximity_threshold_min: 0.1
+  wall_proximity_threshold_max: 0.5
+  wall_proximity_penalty: 0.5
   speed_weight: 0.0            # Don't reward speed — just complete laps safely
   survival_reward: 0.01        # Tiny reward for staying alive
 
@@ -135,11 +137,11 @@ domain_randomization:
   mass: { enabled: true, range: [3.2, 4.2] }
   lidar_noise: { enabled: true, std: 0.04 }
   lidar_dropout: { enabled: true, rate: 0.02 }
-  action_delay: { enabled: true, max_steps: 3 }       # ~30ms simulated latency
+  action_delay: { enabled: true, max_steps: 5 }       # ~30ms simulated latency
 
 expert:
   pure_pursuit:
-    target_speed: 3.0          # Match max_speed
+    target_speed: 3.5          # Match max_speed
 
 evaluation:
   eval_freq: 25000

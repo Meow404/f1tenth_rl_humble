@@ -50,11 +50,22 @@ class RewardFunction(ABC):
         self.survival_reward = config.get("survival_reward", 0.0)
         self.steering_change_penalty = config.get("steering_change_penalty", 0.0)
         self.wall_proximity_penalty = config.get("wall_proximity_penalty", 0.0)
-        self.wall_proximity_threshold = config.get("wall_proximity_threshold", 0.5)
+        # Randomize wall proximity threshold for curriculum learning
+        self.wall_proximity_threshold_min = config.get("wall_proximity_threshold_min", 0.2)
+        self.wall_proximity_threshold_max = config.get("wall_proximity_threshold_max", 0.5)
+        self.wall_proximity_threshold = np.random.uniform(
+            self.wall_proximity_threshold_min, 
+            self.wall_proximity_threshold_max
+        )
         self._progress = 0.0
 
     def reset(self, obs_dict: Dict, ego_idx: int):
         self._progress = 0.0
+        # Randomize wall proximity threshold at each reset
+        self.wall_proximity_threshold = np.random.uniform(
+            self.wall_proximity_threshold_min, 
+            self.wall_proximity_threshold_max
+        )
         self._reset_impl(obs_dict, ego_idx)
 
     def _reset_impl(self, obs_dict, ego_idx):

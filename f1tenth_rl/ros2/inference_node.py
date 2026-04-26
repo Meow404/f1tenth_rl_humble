@@ -115,7 +115,9 @@ if ROS2_AVAILABLE:
             self.include_velocity = obs_cfg.get("include_velocity", True)
             self.include_yaw_rate = obs_cfg.get("include_yaw_rate", True)
             self.include_prev_action = obs_cfg.get("include_prev_action", True)
+            self.include_wall_threshold = obs_cfg.get("include_wall_threshold", False)
             self.num_waypoints = obs_cfg.get("num_waypoints", 5)
+            self.wall_proximity_threshold = obs_cfg.get("wall_proximity_threshold", 0.3)
             self.max_steer = act_cfg.get("max_steer", 0.4189)
             self.cfg_max_speed = act_cfg.get("max_speed", 4.0)
             self.cfg_min_speed = act_cfg.get("min_speed", 0.5)
@@ -411,7 +413,11 @@ if ROS2_AVAILABLE:
             if self.include_prev_action:
                 parts.append(self.prev_action.astype(np.float32))
 
-            # 5. Waypoint features (LOCALIZATION MODE ONLY)
+            # 5. Wall proximity threshold
+            if self.include_wall_threshold:
+                parts.append(np.array([self.wall_proximity_threshold], dtype=np.float32))
+
+            # 6. Waypoint features (LOCALIZATION MODE ONLY)
             if self.use_localization and self.waypoints is not None:
                 wp_features = self._compute_waypoint_features()
                 parts.append(wp_features)

@@ -38,7 +38,6 @@ from typing import Optional, Dict, Any, Callable, Tuple
 from f1tenth_rl.envs.observations import ObservationBuilder
 from f1tenth_rl.envs.rewards import ProgressReward, CTHReward, SpeedReward
 from f1tenth_rl.envs.domain_randomization import DomainRandomizationWrapper
-from f1tenth_rl.envs.actuator_model import ActuatorModel, CurriculumScheduler
 
 
 # ============================================================
@@ -304,24 +303,6 @@ class F1TenthWrapper(gym.Env):
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.prev_obs_dict = None
 
-        # ---- Actuator model (optional) ----
-        self.actuator_model = ActuatorModel.from_env(config)
-        if self.actuator_model is not None:
-            print(f"  [ActuatorModel] Loaded from config")
-
-        # ---- Curriculum learning (optional) ----
-        self.curriculum = None
-        curriculum_cfg = config.get("curriculum", {})
-        if curriculum_cfg.get("enabled", False):
-            self.curriculum = CurriculumScheduler(
-                speed_schedule=curriculum_cfg.get("speed_schedule"),
-                margin_schedule=curriculum_cfg.get("margin_schedule"),
-                steps_per_phase=curriculum_cfg.get("steps_per_phase", 100_000),
-            )
-            speed, margin = self.curriculum.get_current()
-            print(f"  [Curriculum] Initialized. Phase 0: speed={speed:.1f} m/s, margin={margin:.2f} m")
-            self.max_speed = speed
-
     def _get_waypoints(self, rew_cfg: Dict, env_cfg: Dict) -> Optional[np.ndarray]:
         """Extract waypoints: Track object first, then file fallback."""
         try:
@@ -553,7 +534,10 @@ class F1TenthWrapper(gym.Env):
         self.control_steps_since_update = 0
         self.cached_lidar_scan = flat_obs["scans"]
 
-        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
+        observation = self.obs_builder.build(
+            flat_obs, self.ego_idx, self.prev_action,
+            wall_proximity_threshold=self.reward_fn.wall_proximity_threshold
+        )
         info["raw_obs"] = flat_obs
         return observation, info
 
@@ -562,23 +546,8 @@ class F1TenthWrapper(gym.Env):
         prev_physical_action = self.prev_action.copy()
 
         physical_action = self._scale_action(action)
-
-        # Apply actuator model correction if available
-        if self.actuator_model is not None and self.prev_obs_dict is not None:
-            ego_speed = float(self.prev_obs_dict["linear_vels_x"][self.ego_idx])
-            ego_yaw_rate = float(self.prev_obs_dict["ang_vels_z"][self.ego_idx])
-            cmd_steer = physical_action[self.ego_idx, 0]
-            predicted_yaw_rate = self.actuator_model.predict(cmd_steer, ego_speed, ego_yaw_rate)
-            # Store predicted yaw rate in info for analysis (the actual obs update comes from sim)
-        
         raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(physical_action)
         self.current_step += 1
-
-        # Update curriculum if enabled
-        if self.curriculum is not None:
-            self.curriculum.update(steps=1)
-            speed, margin = self.curriculum.get_current()
-            self.max_speed = speed
 
         flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
         
@@ -601,7 +570,10 @@ class F1TenthWrapper(gym.Env):
             lap_complete=(ego_lap_count >= num_laps),
         )
 
-        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
+        observation = self.obs_builder.build(
+            flat_obs, self.ego_idx, self.prev_action,
+            wall_proximity_threshold=self.reward_fn.wall_proximity_threshold
+        )
         info.update({
             "raw_obs": flat_obs,
             "ego_collision": ego_collision,
@@ -612,11 +584,6 @@ class F1TenthWrapper(gym.Env):
             "step": self.current_step,
             "physical_action": physical_action[self.ego_idx].copy(),
         })
-        
-        # Add curriculum info to logs if enabled
-        if self.curriculum is not None:
-            info.update(self.curriculum.get_phase_info())
-        
         return observation, float(reward), terminated, truncated, info
 
     def render(self):
@@ -654,8 +621,11 @@ class F1TenthWrapper(gym.Env):
         """Get action from frozen RL opponent policy."""
         import torch
         try:
-            obs = self.obs_builder.build(self.prev_obs_dict, ego_idx=agent_idx,
-                                          prev_action=np.zeros(2, dtype=np.float32))
+            obs = self.obs_builder.build(
+                self.prev_obs_dict, ego_idx=agent_idx,
+                prev_action=np.zeros(2, dtype=np.float32),
+                wall_proximity_threshold=self.reward_fn.wall_proximity_threshold
+            )
             obs_t = torch.FloatTensor(obs).unsqueeze(0)
             with torch.no_grad():
                 action = self.opponent_rl_policy._predict(obs_t, deterministic=True)
