@@ -30,6 +30,22 @@
 #       --map maps/levine_slam/levine_slam --num-envs 12 --device cuda
 # ===================================================================
 
+lidar:
+  raw_beams: 1080
+  fov_deg: 270.0
+  range_max: 30.0
+  
+  # NEW: Lidar scan update frequency in Hz
+  # 0 (default) = update every step (100 Hz, no decoupling)
+  # 20 = new scan every 50ms (5 steps at 100 Hz physics)
+  update_freq_hz: 20
+  
+  # NEW: Control loop frequency in Hz
+  # 0 (default) = every step (100 Hz)
+  # 50 = policy inference every 2 steps
+  # Must be >= lidar update frequency
+  control_freq_hz: 50
+  
 experiment:
   name: "sim2real_e2e"
   seed: 42

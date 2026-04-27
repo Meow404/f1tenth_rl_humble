@@ -1,0 +1,190 @@
+# ===================================================================
+# Asynchronous Sensor and Control Frequencies
+# ===================================================================
+#
+# This config demonstrates how to decouple lidar update frequency
+# from the control loop frequency. Useful for simulating real sensor
+# timing or testing robustness to sensor delays.
+#
+# Example: 20 Hz lidar (50ms between scans) + 50 Hz control (20ms loop)
+# - At 100 Hz base physics: lidar updates every 5 steps, control every 2 steps
+# - Stale lidar data is cached and reused when no fresh scan is available
+#
+# Usage:
+#   python scripts/train.py --config configs/async_frequencies.yaml
+
+
+# -------------------------------------------------------------------
+# EXPERIMENT SETTINGS
+# -------------------------------------------------------------------
+
+experiment:
+  name: "async_20hz_lidar_50hz_control"
+  seed: 42
+  device: "auto"
+  runs_dir: "runs"
+  wandb: true
+  wandb_project: "f1tenth_rl"
+
+
+# -------------------------------------------------------------------
+# ENVIRONMENT
+# -------------------------------------------------------------------
+
+env:
+  map_path: "Spielberg"
+  map_ext: ".png"
+  num_agents: 1
+  timestep: 0.01         # 100 Hz physics (mandatory)
+  integrator: "rk4"
+  num_envs: 8
+  max_steps: 3000
+  num_laps: 1
+  start_pose: null
+
+
+# -------------------------------------------------------------------
+# LIDAR SENSOR — 20 Hz update, 50 Hz control
+# -------------------------------------------------------------------
+#
+# Base physics: 100 Hz (timestep = 0.01)
+#
+# Lidar: 20 Hz means new scan every 50ms = 5 physics steps
+#   update_freq_hz: 20 → lidar_update_steps = 100 Hz / 20 Hz = 5
+#   Between updates, stale lidar is cached and reused
+#
+# Control: 50 Hz means policy inference every 20ms = 2 physics steps
+#   control_freq_hz: 50 → control_update_steps = 100 Hz / 50 Hz = 2
+#   Similar to frame skipping in Atari RL
+#
+# This setup tests robustness: the policy must handle:
+#   - Stale sensor data (lidar not always fresh)
+#   - Frequent control requests (more often than sensor updates)
+#   - Real-world timing mismatches
+
+lidar:
+  raw_beams: 1080
+  fov_deg: 270.0
+  range_max: 30.0
+  
+  # NEW: Lidar scan update frequency in Hz
+  # 0 (default) = update every step (100 Hz, no decoupling)
+  # 20 = new scan every 50ms (5 steps at 100 Hz physics)
+  update_freq_hz: 20
+  
+  # NEW: Control loop frequency in Hz
+  # 0 (default) = every step (100 Hz)
+  # 50 = policy inference every 2 steps
+  # Must be >= lidar update frequency
+  control_freq_hz: 50
+
+
+# -------------------------------------------------------------------
+# OBSERVATION SPACE
+# -------------------------------------------------------------------
+
+observation:
+  type: "lidar_state"
+  lidar_beams: 108
+  lidar_clip: 10.0
+  lidar_normalize: true
+  include_velocity: true
+  include_yaw_rate: true
+  include_steering: false
+  include_prev_action: true
+  num_waypoints: 5
+  waypoint_spacing: 0.5
+  frame_stack: 1
+
+
+# -------------------------------------------------------------------
+# ACTION SPACE
+# -------------------------------------------------------------------
+
+action:
+  type: "continuous"
+  max_speed: 6.0         # Lower speed for stable learning
+  min_speed: 0.5
+  max_steer: 0.4189
+  smoothing_alpha: 0.5   # Smooth actions to handle frequent updates
+  steer_dead_zone: 0.01
+  max_steer_rate: 0.0    # No rate limiting
+
+
+# -------------------------------------------------------------------
+# REWARD FUNCTION
+# -------------------------------------------------------------------
+
+reward:
+  type: "progress"
+  
+  # Progress-based reward (distance along centerline)
+  progress_reward_gain: 1.0
+  speed_reward_gain: 0.0
+  
+  # Penalties
+  collision_penalty: -10.0
+  collision_terminal: true
+  
+  # Margin to walls
+  min_margin: 0.25
+  min_margin_penalty: -0.5
+  
+  # Reward clipping to prevent outliers
+  reward_clip: 10.0
+
+
+# -------------------------------------------------------------------
+# TRAINING ALGORITHM
+# -------------------------------------------------------------------
+
+algorithm:
+  type: "ppo"
+  total_timesteps: 1_000_000
+  
+  # PPO hyperparameters
+  learning_rate: 3e-4
+  batch_size: 256
+  n_steps: 2048
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.01
+  max_grad_norm: 0.5
+  
+  # Sampling
+  use_sde: false
+  sde_sample_freq: -1
+  policy_kwargs:
+    net_arch:
+      pi: [128, 128]
+      vf: [128, 128]
+    activation_fn: "relu"
+    log_std_init: -0.5
+
+
+# -------------------------------------------------------------------
+# DOMAIN RANDOMIZATION (Optional)
+# -------------------------------------------------------------------
+
+domain_randomization:
+  enabled: false
+  mode: "off"
+
+
+# -------------------------------------------------------------------
+# ACTUATOR MODEL (Optional)
+# -------------------------------------------------------------------
+
+actuator_model:
+  enabled: false
+
+
+# -------------------------------------------------------------------
+# CURRICULUM LEARNING (Optional)
+# -------------------------------------------------------------------
+
+curriculum:
+  enabled: false

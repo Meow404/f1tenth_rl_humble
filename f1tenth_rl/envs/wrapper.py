@@ -235,7 +235,21 @@ class F1TenthWrapper(gym.Env):
         self.steer_dead_zone = act_cfg.get("steer_dead_zone", 0.0)
         self.max_steer_rate = act_cfg.get("max_steer_rate", 0.0)  # rad/step, 0 = unlimited
 
-        # ---- Create base environment ----
+        # ---- Lidar and control loop frequency ----
+        lidar_cfg = config.get("lidar", {})
+        self.lidar_update_freq_hz = lidar_cfg.get("update_freq_hz", 0)
+        self.control_freq_hz = lidar_cfg.get("control_freq_hz", 0)
+        
+        # Convert frequencies to steps (how many physics steps between updates)
+        base_freq_hz = 1.0 / self.timestep
+        self.lidar_update_steps = max(1, round(base_freq_hz / self.lidar_update_freq_hz)) if self.lidar_update_freq_hz > 0 else 1
+        self.control_update_steps = max(1, round(base_freq_hz / self.control_freq_hz)) if self.control_freq_hz > 0 else 1
+        
+        # Cache for lidar and observations when frequencies are decoupled
+        self.cached_lidar_scan = None
+        self.cached_obs = None
+        self.lidar_steps_since_update = 0
+        self.control_steps_since_update = 0
         self.base_env = self._create_base_env(env_cfg, render_mode)
 
         # ---- Extract waypoints from Track ----
@@ -417,6 +431,33 @@ class F1TenthWrapper(gym.Env):
         )
         return gym.make("f1tenth_gym:f1tenth-v0", config=env_config, render_mode=render_mode)
 
+    # ---- Lidar frequency management ----
+
+    def _apply_lidar_frequency(self, flat_obs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Manage lidar update frequency independently from control frequency.
+        
+        If lidar_update_freq_hz is set, only update the lidar scan when enough
+        steps have passed. Cache and reuse stale lidar data between updates.
+        """
+        if self.lidar_update_freq_hz <= 0:
+            # Disabled: update lidar every step (default behavior)
+            self.cached_lidar_scan = flat_obs["scans"]
+            return flat_obs
+        
+        # Check if it's time for a new lidar update
+        self.lidar_steps_since_update += 1
+        if self.lidar_steps_since_update >= self.lidar_update_steps:
+            # Time for a fresh scan
+            self.cached_lidar_scan = flat_obs["scans"]
+            self.lidar_steps_since_update = 0
+        else:
+            # Reuse the cached lidar scan, update everything else
+            if self.cached_lidar_scan is not None:
+                flat_obs["scans"] = self.cached_lidar_scan
+        
+        return flat_obs
+
     # ---- Action methods ----
 
     def _build_discrete_actions(self, n_speed, n_steer):
@@ -506,6 +547,11 @@ class F1TenthWrapper(gym.Env):
         self.reward_fn.reset(flat_obs, self.ego_idx)
         if self.actuator_model is not None:
             self.actuator_model.reset()
+        
+        # Reset frequency counters
+        self.lidar_steps_since_update = 0
+        self.control_steps_since_update = 0
+        self.cached_lidar_scan = flat_obs["scans"]
 
         observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
         info["raw_obs"] = flat_obs
@@ -535,6 +581,10 @@ class F1TenthWrapper(gym.Env):
             self.max_speed = speed
 
         flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
+        
+        # Apply lidar frequency management (cache stale lidar if needed)
+        flat_obs = self._apply_lidar_frequency(flat_obs)
+        
         self.prev_obs_dict = flat_obs
 
         ego_collision = bool(flat_obs["collisions"][self.ego_idx])

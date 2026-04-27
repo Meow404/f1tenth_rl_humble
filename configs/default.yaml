@@ -65,8 +65,8 @@ env:
   # 2. Your own SLAM maps (path to your map, without the file extension):
   #    "maps/levine_slam/levine_slam"
   #    "maps/my_building/my_building"
-  map_path: "Spielberg"
-  map_ext: ".png"        # File extension for the map image
+  map_path: "maps/levine_race2/levine_race2"
+  map_ext: ".pgm"        # File extension for the map image
 
   # How many cars on the track. Set to 1 for solo training.
   # Set to 2 for multi-agent training (racing against an opponent).
@@ -111,6 +111,18 @@ lidar:
   raw_beams: 1080        # How many beams the real sensor produces
   fov_deg: 270.0         # Field of view in degrees
   range_max: 30.0        # Maximum detection range in meters
+
+  # Lidar update frequency (Hz). Controls how often new scans arrive.
+  # 0 (default) = update every step, same as physics timestep
+  # 20 = new lidar scan every 50ms (useful for real sensor simulation)
+  # Can be any positive value. Stale lidar data is reused between updates.
+  update_freq_hz: 0
+
+  # Control loop frequency (Hz). How often inference runs.
+  # 0 (default) = every step (same as physics)
+  # 50 = run policy every 2 steps (at 100 Hz physics)
+  # Must be >= lidar_update_freq_hz
+  control_freq_hz: 0
 
 
 # -------------------------------------------------------------------
