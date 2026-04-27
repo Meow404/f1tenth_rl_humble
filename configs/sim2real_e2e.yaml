@@ -89,6 +89,8 @@ action:
   smoothing_alpha: 0.3         # Heavy smoothing prevents servo jitter on real car
   steer_dead_zone: 0.005         # OFF during training (used on real car only)
   max_steer_rate: 0.5          # OFF during training (0 = unlimited)
+  chunking_enabled: false
+  chunk_horizon_steps: 1
 
 reward:
   type: "cth"                  # Cross-track + heading → smoother than "progress"

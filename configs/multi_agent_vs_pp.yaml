@@ -63,6 +63,8 @@ action:
   min_speed: 0.5
   max_steer: 0.4189
   smoothing_alpha: 0.3
+  chunking_enabled: false
+  chunk_horizon_steps: 1
 
 reward:
   type: "cth"

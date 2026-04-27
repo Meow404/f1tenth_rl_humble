@@ -233,6 +233,7 @@ class F1TenthWrapper(gym.Env):
         self.smoothing_alpha = act_cfg.get("smoothing_alpha", 1.0)
         self.steer_dead_zone = act_cfg.get("steer_dead_zone", 0.0)
         self.max_steer_rate = act_cfg.get("max_steer_rate", 0.0)  # rad/step, 0 = unlimited
+        self.act_chunking_enabled = bool(act_cfg.get("chunking_enabled", False))
 
         # ---- Lidar and control loop frequency ----
         lidar_cfg = config.get("lidar", {})
@@ -243,6 +244,15 @@ class F1TenthWrapper(gym.Env):
         base_freq_hz = 1.0 / self.timestep
         self.lidar_update_steps = max(1, round(base_freq_hz / self.lidar_update_freq_hz)) if self.lidar_update_freq_hz > 0 else 1
         self.control_update_steps = max(1, round(base_freq_hz / self.control_freq_hz)) if self.control_freq_hz > 0 else 1
+
+        chunk_horizon_steps = int(act_cfg.get("chunk_horizon_steps", 0))
+        if chunk_horizon_steps <= 0:
+            chunk_horizon_steps = self.control_update_steps if self.control_freq_hz > 0 else 1
+        self.act_chunk_horizon_steps = max(1, chunk_horizon_steps)
+
+        if self.act_chunking_enabled and self.action_type != "continuous":
+            print("  [ACT] Chunking only supports continuous actions right now; disabling chunking.")
+            self.act_chunking_enabled = False
         
         # Cache for lidar and observations when frequencies are decoupled
         self.cached_lidar_scan = None
@@ -269,8 +279,17 @@ class F1TenthWrapper(gym.Env):
 
         # ---- Action space ----
         if self.action_type == "continuous":
-            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+            if self.act_chunking_enabled:
+                self.action_space = spaces.Box(
+                    low=-1.0,
+                    high=1.0,
+                    shape=(self.act_chunk_horizon_steps * 2,),
+                    dtype=np.float32,
+                )
+            else:
+                self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
         elif self.action_type == "discrete":
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
             n_s = act_cfg.get("num_speed_bins", 5)
             n_st = act_cfg.get("num_steer_bins", 7)
             self.action_space = spaces.Discrete(n_s * n_st)
@@ -504,6 +523,69 @@ class F1TenthWrapper(gym.Env):
 
         return all_actions
 
+    def _execute_control_step(self, action: np.ndarray):
+        """Execute one physical control step and return the env step tuple."""
+        prev_physical_action = self.prev_action.copy()
+
+        physical_action = self._scale_action(action)
+        raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(physical_action)
+        self.current_step += 1
+
+        flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
+
+        # Apply lidar frequency management (cache stale lidar if needed)
+        flat_obs = self._apply_lidar_frequency(flat_obs)
+
+        self.prev_obs_dict = flat_obs
+
+        ego_collision = bool(flat_obs["collisions"][self.ego_idx])
+        ego_lap_count = int(flat_obs["lap_counts"][self.ego_idx])
+        num_laps = self.config["env"].get("num_laps", 1)
+        terminated = done
+        truncated = self.current_step >= self.max_steps
+
+        reward = self.reward_fn.compute(
+            obs_dict=flat_obs, ego_idx=self.ego_idx,
+            action=physical_action[self.ego_idx],
+            prev_action=prev_physical_action,  # Use the ACTUAL previous action
+            terminated=terminated, collision=ego_collision,
+            lap_complete=(ego_lap_count >= num_laps),
+        )
+
+        observation = self.obs_builder.build(
+            flat_obs, self.ego_idx, self.prev_action,
+            wall_proximity_threshold=self.reward_fn.wall_proximity_threshold
+        )
+        info.update({
+            "raw_obs": flat_obs,
+            "ego_collision": ego_collision,
+            "ego_speed": float(flat_obs["linear_vels_x"][self.ego_idx]),
+            "ego_lap_count": ego_lap_count,
+            "ego_lap_time": float(flat_obs["lap_times"][self.ego_idx]),
+            "progress": self.reward_fn.get_progress(),
+            "step": self.current_step,
+            "physical_action": physical_action[self.ego_idx].copy(),
+        })
+        return observation, float(reward), terminated, truncated, info
+
+    def _execute_action_chunk(self, action: np.ndarray):
+        """Execute a flattened sequence of actions open-loop over multiple physics steps."""
+        chunk = np.asarray(action, dtype=np.float32).reshape(self.act_chunk_horizon_steps, 2)
+
+        accumulated_reward = 0.0
+        observation = None
+        info = {}
+        terminated = False
+        truncated = False
+
+        for sub_action in chunk:
+            observation, reward, terminated, truncated, info = self._execute_control_step(sub_action)
+            accumulated_reward += reward
+            if terminated or truncated:
+                break
+
+        return observation, accumulated_reward, terminated, truncated, info
+
     # ---- Core gym.Env interface ----
 
     def reset(self, seed=None, options=None) -> Tuple[np.ndarray, Dict]:
@@ -542,49 +624,10 @@ class F1TenthWrapper(gym.Env):
         return observation, info
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        # Save previous action BEFORE _scale_action updates it
-        prev_physical_action = self.prev_action.copy()
+        if self.act_chunking_enabled:
+            return self._execute_action_chunk(action)
 
-        physical_action = self._scale_action(action)
-        raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(physical_action)
-        self.current_step += 1
-
-        flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
-        
-        # Apply lidar frequency management (cache stale lidar if needed)
-        flat_obs = self._apply_lidar_frequency(flat_obs)
-        
-        self.prev_obs_dict = flat_obs
-
-        ego_collision = bool(flat_obs["collisions"][self.ego_idx])
-        ego_lap_count = int(flat_obs["lap_counts"][self.ego_idx])
-        num_laps = self.config["env"].get("num_laps", 1)
-        terminated = done
-        truncated = self.current_step >= self.max_steps
-
-        reward = self.reward_fn.compute(
-            obs_dict=flat_obs, ego_idx=self.ego_idx,
-            action=physical_action[self.ego_idx],
-            prev_action=prev_physical_action,  # Use the ACTUAL previous action
-            terminated=terminated, collision=ego_collision,
-            lap_complete=(ego_lap_count >= num_laps),
-        )
-
-        observation = self.obs_builder.build(
-            flat_obs, self.ego_idx, self.prev_action,
-            wall_proximity_threshold=self.reward_fn.wall_proximity_threshold
-        )
-        info.update({
-            "raw_obs": flat_obs,
-            "ego_collision": ego_collision,
-            "ego_speed": float(flat_obs["linear_vels_x"][self.ego_idx]),
-            "ego_lap_count": ego_lap_count,
-            "ego_lap_time": float(flat_obs["lap_times"][self.ego_idx]),
-            "progress": self.reward_fn.get_progress(),
-            "step": self.current_step,
-            "physical_action": physical_action[self.ego_idx].copy(),
-        })
-        return observation, float(reward), terminated, truncated, info
+        return self._execute_control_step(action)
 
     def render(self):
         if self.render_mode is not None:

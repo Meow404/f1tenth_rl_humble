@@ -224,6 +224,8 @@ action:
   # 0.3 = smooth heavily (70% previous action + 30% new action)
   # Lower values = smoother driving, but the agent reacts more slowly.
   smoothing_alpha: 1.0
+  chunking_enabled: false
+  chunk_horizon_steps: 1
 
 
 # -------------------------------------------------------------------

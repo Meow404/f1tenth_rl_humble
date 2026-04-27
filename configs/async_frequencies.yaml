@@ -109,6 +109,8 @@ action:
   smoothing_alpha: 0.5   # Smooth actions to handle frequent updates
   steer_dead_zone: 0.01
   max_steer_rate: 0.0    # No rate limiting
+  chunking_enabled: false
+  chunk_horizon_steps: 1
 
 
 # -------------------------------------------------------------------

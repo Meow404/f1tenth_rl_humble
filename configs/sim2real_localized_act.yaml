@@ -1,32 +1,14 @@
 # ===================================================================
-# Sim2Real: Localized Policy (Lidar + Particle Filter)
+# Sim2Real: Localized Policy + ACT Chunking
 # ===================================================================
 #
-# This policy uses a particle filter to know WHERE on the track the
-# car is. This lets the agent see upcoming waypoints and follow a
-# specific raceline — something the end-to-end policy can't do.
-#
-# Pros:
-#   - Can follow an optimized raceline precisely
-#   - Track-aware decisions (knows which corner is coming)
-#   - Potentially faster lap times than E2E
-#
-# Cons:
-#   - Requires a particle filter running on the car
-#   - Extra computation and complexity
-#   - If localization fails, the policy gets garbage inputs
-#   - Can exhibit oscillating steering ("waypoint chasing")
-#
-# Observation vector (122 dimensions):
-#   [108 lidar, velocity, yaw_rate, prev_steer, prev_speed,
-#    5 × (distance_to_waypoint, heading_to_waypoint)]
-#
-# To reduce steering oscillation:
-#   - Increase waypoint_spacing (1.5m+ works well)
-#   - Increase steering_change_penalty (1.0+)
+# Based on sim2real_localized.yaml, but with:
+#   - action chunking enabled for ACT-style training
+#   - curriculum schedules for max speed and safety margin
+#   - the same sim2real domain randomization stack as the localized preset
 #
 # Usage:
-#   python scripts/train.py --config configs/sim2real_localized.yaml \
+#   python scripts/train.py --config configs/sim2real_localized_act.yaml \
 #       --map maps/levine_slam/levine_slam --num-envs 12 --device cuda
 # ===================================================================
 
@@ -34,12 +16,12 @@ lidar:
   raw_beams: 1080
   fov_deg: 270.0
   range_max: 30.0
-  
+
   # NEW: Lidar scan update frequency in Hz
   # 0 (default) = update every step (100 Hz, no decoupling)
   # 20 = new scan every 50ms (5 steps at 100 Hz physics)
   update_freq_hz: 20
-  
+
   # NEW: Control loop frequency in Hz
   # 0 (default) = every step (100 Hz)
   # 50 = policy inference every 2 steps
@@ -47,7 +29,7 @@ lidar:
   control_freq_hz: 50
 
 experiment:
-  name: "sim2real_localized"
+  name: "sim2real_localized_act"
   seed: 42
   device: "auto"
   runs_dir: "runs"
@@ -63,11 +45,6 @@ env:
   num_envs: 8
   max_steps: 3000
   num_laps: 1
-
-lidar:
-  raw_beams: 1080
-  fov_deg: 270.0
-  range_max: 30.0
 
 observation:
   type: "lidar_waypoint"       # Lidar + waypoint features (needs localization)
@@ -90,8 +67,8 @@ action:
   smoothing_alpha: 0.3
   steer_dead_zone: 0.0
   max_steer_rate: 0.0
-  chunking_enabled: false
-  chunk_horizon_steps: 1
+  chunking_enabled: true
+  chunk_horizon_steps: 3
 
 reward:
   type: "cth"
@@ -128,6 +105,9 @@ network:
   pi_layers: [64, 64]
   vf_layers: [64, 64]
 
+# Domain randomization: keep the sim2real stack from sim2real_localized.
+# The max speed / safety margin schedule is tracked separately in the
+# curriculum section below, which matches the existing trainer examples.
 domain_randomization:
   enabled: true
   mode: "curriculum"
@@ -138,6 +118,14 @@ domain_randomization:
   lidar_noise: { enabled: true, std: 0.04 }
   lidar_dropout: { enabled: true, rate: 0.02 }
   action_delay: { enabled: true, max_steps: 3 }
+
+# Curriculum schedule for the runtime max_speed / safety_margin values.
+# This is the repo's existing convention for those two parameters.
+curriculum:
+  enabled: true
+  steps_per_phase: 100_000
+  speed_schedule:  [2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0]
+  margin_schedule: [1.5, 1.2, 1.0, 0.8, 0.6, 0.4, 0.3]
 
 expert:
   pure_pursuit:
