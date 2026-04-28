@@ -38,14 +38,18 @@ class ActuatorNet(nn.Module):
     Input: concatenated history of steering commands + state
     Output: predicted actual yaw_rate
     """
-    def __init__(self, in_dim: int):
+    def __init__(self, in_dim: int, hidden_dims: list = None):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, 64), nn.ELU(),
-            nn.Linear(64, 64),     nn.ELU(),
-            nn.Linear(64, 32),     nn.ELU(),
-            nn.Linear(32, 1),
-        )
+        # FIX: accept configurable hidden dims to match train_server architecture
+        if hidden_dims is None:
+            hidden_dims = [64, 64, 32]
+        layers = []
+        prev = in_dim
+        for h in hidden_dims:
+            layers += [nn.Linear(prev, h), nn.ELU()]
+            prev = h
+        layers.append(nn.Linear(prev, 2))  # 2 outputs: yaw_rate, speed
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -80,7 +84,9 @@ class ActuatorModel:
 
         self.device = device
         self.history_steps = history_steps
-        self.feature_dim = history_steps * 3  # cmd_steer, yaw_rate, speed per step
+        self.feature_dim = history_steps * 3  # cmd_steer, yaw_rate, speed per step (past steps only)
+        # Buffer holds one extra slot (current step) that is shifted out before inference
+        self._buffer_dim = (history_steps + 1) * 3
 
         # Load model
         try:
@@ -89,7 +95,8 @@ class ActuatorModel:
             # Fallback: try to load as regular .pth if JIT fails
             checkpoint = torch.load(model_path, map_location=device)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-                self.model = ActuatorNet(self.feature_dim)
+                hidden_dims = checkpoint.get("hidden_dims", [64, 64, 32])
+                self.model = ActuatorNet(self.feature_dim, hidden_dims)
                 self.model.load_state_dict(checkpoint["model_state_dict"])
             else:
                 self.model = checkpoint
@@ -103,8 +110,8 @@ class ActuatorModel:
         if scaler_y_path and Path(scaler_y_path).exists():
             self.scaler_y = joblib.load(scaler_y_path)
 
-        # State history buffer
-        self.history = np.zeros(self.feature_dim, dtype=np.float32)
+        # State history buffer (history_steps+1 slots; slot 0 = current, slots 1.. = past)
+        self.history = np.zeros(self._buffer_dim, dtype=np.float32)
 
     @classmethod
     def from_env(cls, config: Dict[str, Any]) -> Optional["ActuatorModel"]:
@@ -133,9 +140,9 @@ class ActuatorModel:
         cmd_steering: float,
         actual_speed: float,
         actual_yaw_rate: float,
-    ) -> float:
+    ) -> tuple:
         """
-        Predict actual yaw_rate given command and recent history.
+        Predict actual (yaw_rate, speed) given command and recent history.
 
         Args:
             cmd_steering: commanded steering angle [-max_steer, max_steer]
@@ -143,32 +150,37 @@ class ActuatorModel:
             actual_yaw_rate: current yaw rate (rad/s)
 
         Returns:
-            Predicted actual yaw_rate at the next timestep
+            (predicted_yaw_rate, predicted_speed) at the next timestep
         """
-        # Shift history and add new sample
+        # Shift history and add current sample at front.
+        # Training uses h in range(1, history+1), meaning features are
+        # [t-1, t-2, ..., t-history] (never the current step t).
+        # So at inference we skip history[:3] (current step) and use history[3:].
         self.history = np.roll(self.history, 3)
         self.history[:3] = [cmd_steering, actual_yaw_rate, actual_speed]
 
-        # Prepare input
-        x = self.history.reshape(1, -1).astype(np.float32)
+        # Use history[3:] to match training (excludes current step at [:3])
+        x = self.history[3:].reshape(1, -1).astype(np.float32)
         if self.scaler_X is not None:
             x = self.scaler_X.transform(x).astype(np.float32)
 
-        # Predict
+        # Predict — model outputs shape (1, 2): [yaw_rate, speed]
         with torch.no_grad():
             x_t = torch.from_numpy(x).to(self.device)
             y_pred_t = self.model(x_t)
-            y_pred = y_pred_t.cpu().numpy().squeeze()
+            y_pred = y_pred_t.cpu().numpy()  # shape (1, 2)
 
         # Inverse-scale if needed
         if self.scaler_y is not None:
-            y_pred = self.scaler_y.inverse_transform([[y_pred]])[0, 0]
+            y_pred = self.scaler_y.inverse_transform(y_pred)  # shape (1, 2)
 
-        return float(y_pred)
+        predicted_yaw_rate = float(y_pred[0, 0])
+        predicted_speed    = float(y_pred[0, 1])
+        return predicted_yaw_rate, predicted_speed
 
     def reset(self):
         """Reset history for new episode."""
-        self.history.fill(0.0)
+        self.history.fill(0.0)  # zeros entire buffer including the current-step slot
 
 
 class CurriculumScheduler:

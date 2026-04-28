@@ -30,22 +30,6 @@
 #       --map maps/levine_slam/levine_slam --num-envs 12 --device cuda
 # ===================================================================
 
-lidar:
-  raw_beams: 1080
-  fov_deg: 270.0
-  range_max: 30.0
-  
-  # NEW: Lidar scan update frequency in Hz
-  # 0 (default) = update every step (100 Hz, no decoupling)
-  # 20 = new scan every 50ms (5 steps at 100 Hz physics)
-  update_freq_hz: 20
-  
-  # NEW: Control loop frequency in Hz
-  # 0 (default) = every step (100 Hz)
-  # 50 = policy inference every 2 steps
-  # Must be >= lidar update frequency
-  control_freq_hz: 50
-  
 experiment:
   name: "sim2real_e2e"
   seed: 42
@@ -65,12 +49,14 @@ env:
   num_laps: 5
 
 lidar:
-  raw_beams: 1080              # Hokuyo UST-10LX
+  raw_beams: 1080 # Hokuyo UST-10LX
   fov_deg: 270.0
   range_max: 30.0
+  update_freq_hz: 20 # FIX: moved here from duplicate block
+  control_freq_hz: 50 # FIX: moved here from duplicate block
 
 observation:
-  type: "lidar_state"          # Lidar + velocity only — no localization needed
+  type: "lidar_state" # Lidar + velocity only — no localization needed
   lidar_beams: 108
   lidar_clip: 10.0
   lidar_normalize: true
@@ -78,32 +64,32 @@ observation:
   include_yaw_rate: true
   include_steering: false
   include_prev_action: true
-  frame_stack: 1               # Don't stack frames — timing differs on real car
+  frame_stack: 1 # Don't stack frames — timing differs on real car
 
 action:
   type: "continuous"
-  max_speed: 3.0               # Conservative for real car. Increase after it works.
+  max_speed: 3.0 # Conservative for real car. Increase after it works.
   min_speed: 0.5
   max_steer: 0.4189
-  smoothing_alpha: 0.3         # Heavy smoothing prevents servo jitter on real car
-  steer_dead_zone: 0.0         # OFF during training (used on real car only)
-  max_steer_rate: 0.0          # OFF during training (0 = unlimited)
+  smoothing_alpha: 0.3 # Heavy smoothing prevents servo jitter on real car
+  steer_dead_zone: 0.0 # OFF during training (used on real car only)
+  max_steer_rate: 0.0 # OFF during training (0 = unlimited)
 
 reward:
-  type: "cth"                  # Cross-track + heading → smoother than "progress"
-  collision_penalty: -10.0
+  type: "cth" # Cross-track + heading → smoother than "progress"
+  collision_penalty: -10
   lap_bonus: 10.0
-  heading_weight: 0.2          # Reward pointing along the track
-  crosstrack_weight: 0.1       # Penalty for drifting from centerline
+  heading_weight: 0.2 # Reward pointing along the track
+  crosstrack_weight: 0.1 # Penalty for drifting from centerline
   steering_change_penalty: 0.5 # Penalize jerky steering (smooth is critical for real car)
-  wall_proximity_penalty: 0.5  # Gentle nudge away from walls
+  wall_proximity_penalty: 0.5 # Gentle nudge away from walls
   wall_proximity_threshold: 0.3 # Only penalize within 30cm of walls
-  speed_weight: 0.0            # Don't reward speed — just complete laps safely
-  survival_reward: 0.01        # Tiny reward for staying alive
+  speed_weight: 0.0 # Don't reward speed — just complete laps safely
+  survival_reward: 0.01 # Tiny reward for staying alive
 
 algorithm:
   type: "ppo"
-  total_timesteps: 2_000_000   # For real deployment, use 10M-15M
+  total_timesteps: 2_000_000 # For real deployment, use 10M-15M
   ppo:
     learning_rate: 0.0003
     n_steps: 2048
@@ -112,34 +98,34 @@ algorithm:
     gamma: 0.99
     gae_lambda: 0.95
     clip_range: 0.2
-    ent_coef: 0.001            # Less exploration than default (we know the task)
+    ent_coef: 0.001 # Less exploration than default (we know the task)
     vf_coef: 0.5
     max_grad_norm: 0.5
 
 network:
   type: "mlp"
   mlp:
-    hidden_sizes: [128, 128]   # Smaller network for faster inference on Jetson
+    hidden_sizes: [ 128, 128 ] # Smaller network for faster inference on Jetson
     activation: "relu"
-  pi_layers: [64, 64]
-  vf_layers: [64, 64]
+  pi_layers: [ 64, 64 ]
+  vf_layers: [ 64, 64 ]
 
 # Domain randomization: THE key ingredient for sim2real transfer.
 # "curriculum" mode = learn to drive first, then learn to be robust.
 domain_randomization:
   enabled: true
-  mode: "curriculum"           # off → fixed → curriculum (recommended)
-  curriculum_warmup: 0.2       # No DR for first 20% of training
-  curriculum_full: 0.6         # Full DR from 60% onwards
-  friction: { enabled: true, range: [0.7, 1.3] }     # Most important parameter
-  mass: { enabled: true, range: [3.2, 4.2] }
+  mode: "curriculum" # off → fixed → curriculum (recommended)
+  curriculum_warmup: 0.2 # No DR for first 20% of training
+  curriculum_full: 0.6 # Full DR from 60% onwards
+  friction: { enabled: true, range: [ 0.7, 1.3 ] } # Most important parameter
+  mass: { enabled: true, range: [ 3.2, 4.2 ] }
   lidar_noise: { enabled: true, std: 0.04 }
   lidar_dropout: { enabled: true, rate: 0.02 }
-  action_delay: { enabled: true, max_steps: 3 }       # ~30ms simulated latency
+  action_delay: { enabled: true, max_steps: 3 } # ~30ms simulated latency
 
 expert:
   pure_pursuit:
-    target_speed: 3.0          # Match max_speed
+    target_speed: 3.0 # Match max_speed
 
 evaluation:
   eval_freq: 25000
