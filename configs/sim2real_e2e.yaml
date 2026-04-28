@@ -55,7 +55,7 @@ experiment:
   wandb_project: "f1tenth_rl"
 
 env:
-  map_path: "maps/levine_race/levine_race2"
+  map_path: "maps/levine_slam/levine_slam"
   map_ext: ".png"
   num_agents: 1
   timestep: 0.01
@@ -97,12 +97,12 @@ reward:
   collision_penalty: -10.0
   lap_bonus: 10.0
   heading_weight: 0.2          # Reward pointing along the track
-  crosstrack_weight: 0.1       # Penalty for drifting from centerline
+  crosstrack_weight: 0.005       # Penalty for drifting from centerline
   steering_change_penalty: 0.5 # Penalize jerky steering (smooth is critical for real car)
   wall_proximity_threshold_min: 0.1
-  wall_proximity_threshold_max: 0.5
+  wall_proximity_threshold_max: 0.4
   wall_proximity_penalty: 0.5
-  speed_weight: 0.0            # Don't reward speed — just complete laps safely
+  speed_weight: 0.01           # Don't reward speed — just complete laps safely
   survival_reward: 0.01        # Tiny reward for staying alive
 
 algorithm:

@@ -216,6 +216,7 @@ class F1TenthWrapper(gym.Env):
         self.config = config
         self.ego_idx = ego_idx
         self.render_mode = render_mode
+        self.actuator_model = None
 
         env_cfg = config["env"]
         obs_cfg = config["observation"]
