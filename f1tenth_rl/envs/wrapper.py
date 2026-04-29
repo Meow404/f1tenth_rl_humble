@@ -45,7 +45,6 @@ from f1tenth_rl.envs.actuator_model import ActuatorModel, CurriculumScheduler
 # Observation conversion
 # ============================================================
 
-
 def _flatten_obs_to_legacy(obs_dict: Dict, ego_idx: int, num_agents: int) -> Dict:
     """
     Convert dev-humble nested dict obs into flat legacy format.
@@ -54,16 +53,9 @@ def _flatten_obs_to_legacy(obs_dict: Dict, ego_idx: int, num_agents: int) -> Dic
     Legacy:     {"scans": [...], "poses_x": [...], "linear_vels_x": [...], ...}
     """
     legacy = {
-        "scans": [],
-        "poses_x": [],
-        "poses_y": [],
-        "poses_theta": [],
-        "linear_vels_x": [],
-        "linear_vels_y": [],
-        "ang_vels_z": [],
-        "collisions": [],
-        "lap_times": [],
-        "lap_counts": [],
+        "scans": [], "poses_x": [], "poses_y": [], "poses_theta": [],
+        "linear_vels_x": [], "linear_vels_y": [], "ang_vels_z": [],
+        "collisions": [], "lap_times": [], "lap_counts": [],
     }
     for i in range(num_agents):
         agent_obs = obs_dict.get(f"agent_{i}", {})
@@ -88,7 +80,6 @@ def _flatten_obs_to_legacy(obs_dict: Dict, ego_idx: int, num_agents: int) -> Dic
 # ============================================================
 # Map file resolution for custom maps
 # ============================================================
-
 
 def _resolve_map_files(map_source: str) -> str:
     """Ensure map files match dev-humble naming: <n>_map.yaml + <n>_centerline.csv"""
@@ -120,17 +111,11 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
     import yaml as pyyaml
     from PIL import Image
     from scipy.ndimage import binary_erosion
-
     try:
         from skimage.morphology import skeletonize
     except ImportError:
-        np.savetxt(
-            str(output_path),
-            np.array([[0, 0], [1, 0], [1, 1], [0, 1]]),
-            delimiter=",",
-            header="x_m,y_m",
-            comments="",
-        )
+        np.savetxt(str(output_path), np.array([[0, 0], [1, 0], [1, 1], [0, 1]]),
+                    delimiter=",", header="x_m,y_m", comments="")
         return
 
     with open(yaml_path) as f:
@@ -139,13 +124,8 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
     origin = meta.get("origin", [0.0, 0.0, 0.0])
     image_file = meta.get("image")
     if not image_file:
-        np.savetxt(
-            str(output_path),
-            np.array([[0, 0], [1, 0]]),
-            delimiter=",",
-            header="x_m,y_m",
-            comments="",
-        )
+        np.savetxt(str(output_path), np.array([[0, 0], [1, 0]]),
+                    delimiter=",", header="x_m,y_m", comments="")
         return
 
     img = np.array(Image.open(yaml_path.parent / Path(image_file).name).convert("L"))
@@ -153,13 +133,8 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
     skeleton = skeletonize(free > 0)
     pts = np.argwhere(skeleton)
     if len(pts) < 10:
-        np.savetxt(
-            str(output_path),
-            np.array([[0, 0], [1, 0]]),
-            delimiter=",",
-            header="x_m,y_m",
-            comments="",
-        )
+        np.savetxt(str(output_path), np.array([[0, 0], [1, 0]]),
+                    delimiter=",", header="x_m,y_m", comments="")
         return
 
     wx = pts[:, 1] * resolution + origin[0]
@@ -175,7 +150,7 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
         cur = ordered[-1]
         best_d, best_i = float("inf"), -1
         for idx in remaining:
-            d = np.sqrt((world[idx, 0] - cur[0]) ** 2 + (world[idx, 1] - cur[1]) ** 2)
+            d = np.sqrt((world[idx, 0] - cur[0])**2 + (world[idx, 1] - cur[1])**2)
             if d < best_d:
                 best_d, best_i = d, idx
         ordered.append(world[best_i])
@@ -186,25 +161,19 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
     result = [ordered[0]]
     acc = 0.0
     for i in range(1, len(ordered)):
-        d = np.sqrt(
-            (ordered[i, 0] - ordered[i - 1, 0]) ** 2
-            + (ordered[i, 1] - ordered[i - 1, 1]) ** 2
-        )
+        d = np.sqrt((ordered[i, 0] - ordered[i-1, 0])**2 + (ordered[i, 1] - ordered[i-1, 1])**2)
         acc += d
         if acc >= 0.1:
             result.append(ordered[i])
             acc = 0.0
 
-    np.savetxt(
-        str(output_path), np.array(result), delimiter=",", header="x_m,y_m", comments=""
-    )
+    np.savetxt(str(output_path), np.array(result), delimiter=",", header="x_m,y_m", comments="")
     print(f"  [Map] Generated centerline: {len(result)} points -> {output_path.name}")
 
 
 # ============================================================
 # Waypoint extraction from Track object
 # ============================================================
-
 
 def _extract_waypoints_from_track(track) -> np.ndarray:
     """
@@ -219,11 +188,7 @@ def _extract_waypoints_from_track(track) -> np.ndarray:
 
     xs = np.array(line.xs, dtype=np.float64)
     ys = np.array(line.ys, dtype=np.float64)
-    vxs = (
-        np.array(line.vxs, dtype=np.float64)
-        if hasattr(line, "vxs")
-        else np.ones_like(xs) * 5.0
-    )
+    vxs = np.array(line.vxs, dtype=np.float64) if hasattr(line, "vxs") else np.ones_like(xs) * 5.0
 
     return np.column_stack([xs, ys, vxs])
 
@@ -231,7 +196,6 @@ def _extract_waypoints_from_track(track) -> np.ndarray:
 # ============================================================
 # Main Wrapper
 # ============================================================
-
 
 class F1TenthWrapper(gym.Env):
     """
@@ -269,28 +233,18 @@ class F1TenthWrapper(gym.Env):
         self.max_steer = act_cfg.get("max_steer", 0.4189)
         self.smoothing_alpha = act_cfg.get("smoothing_alpha", 1.0)
         self.steer_dead_zone = act_cfg.get("steer_dead_zone", 0.0)
-        self.max_steer_rate = act_cfg.get(
-            "max_steer_rate", 0.0
-        )  # rad/step, 0 = unlimited
+        self.max_steer_rate = act_cfg.get("max_steer_rate", 0.0)  # rad/step, 0 = unlimited
 
         # ---- Lidar and control loop frequency ----
         lidar_cfg = config.get("lidar", {})
         self.lidar_update_freq_hz = lidar_cfg.get("update_freq_hz", 0)
         self.control_freq_hz = lidar_cfg.get("control_freq_hz", 0)
-
+        
         # Convert frequencies to steps (how many physics steps between updates)
         base_freq_hz = 1.0 / self.timestep
-        self.lidar_update_steps = (
-            max(1, round(base_freq_hz / self.lidar_update_freq_hz))
-            if self.lidar_update_freq_hz > 0
-            else 1
-        )
-        self.control_update_steps = (
-            max(1, round(base_freq_hz / self.control_freq_hz))
-            if self.control_freq_hz > 0
-            else 1
-        )
-
+        self.lidar_update_steps = max(1, round(base_freq_hz / self.lidar_update_freq_hz)) if self.lidar_update_freq_hz > 0 else 1
+        self.control_update_steps = max(1, round(base_freq_hz / self.control_freq_hz)) if self.control_freq_hz > 0 else 1
+        
         # Cache for lidar and observations when frequencies are decoupled
         self.cached_lidar_scan = None
         self.cached_obs = None
@@ -305,9 +259,7 @@ class F1TenthWrapper(gym.Env):
         obs_cfg_copy = dict(obs_cfg)
         # Get raw beam count: prefer actual sim value, fallback to lidar config
         try:
-            obs_cfg_copy["_actual_raw_beams"] = (
-                self.base_env.unwrapped.sim.scan_num_beams
-            )
+            obs_cfg_copy["_actual_raw_beams"] = self.base_env.unwrapped.sim.scan_num_beams
         except Exception:
             lidar_cfg = config.get("lidar", {})
             obs_cfg_copy["_actual_raw_beams"] = lidar_cfg.get("raw_beams", 1080)
@@ -318,18 +270,14 @@ class F1TenthWrapper(gym.Env):
 
         # ---- Action space ----
         if self.action_type == "continuous":
-            self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32
-            )
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
         elif self.action_type == "discrete":
             n_s = act_cfg.get("num_speed_bins", 5)
             n_st = act_cfg.get("num_steer_bins", 7)
             self.action_space = spaces.Discrete(n_s * n_st)
             self._build_discrete_actions(n_s, n_st)
         elif self.action_type == "residual":
-            self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32
-            )
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
             self.residual_steer_range = act_cfg.get("residual_steer_range", 0.15)
             self.residual_speed_range = act_cfg.get("residual_speed_range", 2.0)
             self.base_controller = None
@@ -340,17 +288,16 @@ class F1TenthWrapper(gym.Env):
         # ---- Opponent controller (for multi-agent) ----
         self.opponent_controller = None
         self.opponent_rl_policy = None
-        self.opponent_mode = config.get("multi_agent", {}).get(
-            "opponent", "pure_pursuit"
-        )
+        self.opponent_mode = config.get("multi_agent", {}).get("opponent", "pure_pursuit")
         if self.num_agents > 1 and self.waypoints is not None:
             if self.opponent_mode == "pure_pursuit":
                 expert_wp = self._load_expert_waypoints(config)
                 from f1tenth_rl.experts.pure_pursuit import PurePursuitController
-
                 expert_cfg = dict(config.get("expert", {}))
                 expert_cfg["_action_config"] = config.get("action", {})
-                self.opponent_controller = PurePursuitController(expert_wp, expert_cfg)
+                self.opponent_controller = PurePursuitController(
+                    expert_wp, expert_cfg
+                )
 
         # ---- Episode state ----
         self.current_step = 0
@@ -372,9 +319,7 @@ class F1TenthWrapper(gym.Env):
                 steps_per_phase=curriculum_cfg.get("steps_per_phase", 100_000),
             )
             speed, margin = self.curriculum.get_current()
-            print(
-                f"  [Curriculum] Initialized. Phase 0: speed={speed:.1f} m/s, margin={margin:.2f} m"
-            )
+            print(f"  [Curriculum] Initialized. Phase 0: speed={speed:.1f} m/s, margin={margin:.2f} m")
             self.max_speed = speed
 
     def _get_waypoints(self, rew_cfg: Dict, env_cfg: Dict) -> Optional[np.ndarray]:
@@ -390,7 +335,6 @@ class F1TenthWrapper(gym.Env):
         # File-based fallback
         map_path = env_cfg["map_path"]
         from f1tenth_rl.envs.rewards import load_waypoints
-
         return load_waypoints(rew_cfg, map_path)
 
     def _load_expert_waypoints(self, config: Dict) -> np.ndarray:
@@ -412,14 +356,8 @@ class F1TenthWrapper(gym.Env):
                 data = np.loadtxt(wp_path, delimiter=",", skiprows=1)
                 if data.ndim == 1:
                     data = data.reshape(1, -1)
-                wp = (
-                    data[:, :3]
-                    if data.shape[1] >= 3
-                    else np.column_stack([data[:, :2], np.ones(len(data)) * 5.0])
-                )
-                print(
-                    f"  [Expert] Loaded custom raceline: {wp_path} ({len(wp)} waypoints)"
-                )
+                wp = data[:, :3] if data.shape[1] >= 3 else np.column_stack([data[:, :2], np.ones(len(data)) * 5.0])
+                print(f"  [Expert] Loaded custom raceline: {wp_path} ({len(wp)} waypoints)")
                 return wp
             except Exception as e:
                 print(f"  [Expert] Failed to load {wp_path}: {e}")
@@ -448,11 +386,8 @@ class F1TenthWrapper(gym.Env):
         """Create F1TENTH env using dev-humble EnvConfig."""
         import f1tenth_gym
         from f1tenth_gym.envs.env_config import (
-            EnvConfig,
-            SimulationConfig,
-            ObservationConfig,
-            ResetConfig,
-            ControlConfig,
+            EnvConfig, SimulationConfig, ObservationConfig,
+            ResetConfig, ControlConfig,
         )
         from f1tenth_gym.envs.observation import ObservationType
         from f1tenth_gym.envs.reset import ResetStrategy
@@ -494,16 +429,14 @@ class F1TenthWrapper(gym.Env):
             ),
             render_enabled=(render_mode is not None),
         )
-        return gym.make(
-            "f1tenth_gym:f1tenth-v0", config=env_config, render_mode=render_mode
-        )
+        return gym.make("f1tenth_gym:f1tenth-v0", config=env_config, render_mode=render_mode)
 
     # ---- Lidar frequency management ----
 
     def _apply_lidar_frequency(self, flat_obs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Manage lidar update frequency independently from control frequency.
-
+        
         If lidar_update_freq_hz is set, only update the lidar scan when enough
         steps have passed. Cache and reuse stale lidar data between updates.
         """
@@ -511,7 +444,7 @@ class F1TenthWrapper(gym.Env):
             # Disabled: update lidar every step (default behavior)
             self.cached_lidar_scan = flat_obs["scans"]
             return flat_obs
-
+        
         # Check if it's time for a new lidar update
         self.lidar_steps_since_update += 1
         if self.lidar_steps_since_update >= self.lidar_update_steps:
@@ -522,7 +455,7 @@ class F1TenthWrapper(gym.Env):
             # Reuse the cached lidar scan, update everything else
             if self.cached_lidar_scan is not None:
                 flat_obs["scans"] = self.cached_lidar_scan
-
+        
         return flat_obs
 
     # ---- Action methods ----
@@ -539,17 +472,13 @@ class F1TenthWrapper(gym.Env):
         """Convert normalized [-1, 1] actions to physical [steer, speed]."""
         if self.action_type == "continuous":
             steer = float(action[0]) * self.max_steer
-            speed = (float(action[1]) + 1.0) * 0.5 * (
-                self.max_speed - self.min_speed
-            ) + self.min_speed
+            speed = (float(action[1]) + 1.0) * 0.5 * (self.max_speed - self.min_speed) + self.min_speed
         elif self.action_type == "discrete":
             raw = self.discrete_actions[int(action)]
             steer, speed = float(raw[0]), float(raw[1])
         elif self.action_type == "residual":
             if self.base_controller is not None and self.prev_obs_dict is not None:
-                base_steer, base_speed = self.base_controller.get_action(
-                    self.prev_obs_dict
-                )
+                base_steer, base_speed = self.base_controller.get_action(self.prev_obs_dict)
             else:
                 base_steer, base_speed = 0.0, self.min_speed
             steer = base_steer + float(action[0]) * self.residual_steer_range
@@ -561,9 +490,7 @@ class F1TenthWrapper(gym.Env):
         speed = np.clip(speed, self.min_speed, self.max_speed)
 
         raw = np.array([steer, speed], dtype=np.float32)
-        smoothed = (
-            self.smoothing_alpha * raw + (1 - self.smoothing_alpha) * self.prev_action
-        )
+        smoothed = self.smoothing_alpha * raw + (1 - self.smoothing_alpha) * self.prev_action
 
         # Steering dead zone: ignore tiny changes to prevent oscillation
         if self.steer_dead_zone > 0:
@@ -575,9 +502,7 @@ class F1TenthWrapper(gym.Env):
         if self.max_steer_rate > 0:
             steer_delta = smoothed[0] - self.prev_action[0]
             if abs(steer_delta) > self.max_steer_rate:
-                smoothed[0] = (
-                    self.prev_action[0] + np.sign(steer_delta) * self.max_steer_rate
-                )
+                smoothed[0] = self.prev_action[0] + np.sign(steer_delta) * self.max_steer_rate
 
         self.prev_action = smoothed.copy()
 
@@ -587,19 +512,11 @@ class F1TenthWrapper(gym.Env):
         # Opponents: use RL policy, pure pursuit, or drive slowly
         for i in range(self.num_agents):
             if i != self.ego_idx:
-                if (
-                    self.opponent_rl_policy is not None
-                    and self.prev_obs_dict is not None
-                ):
+                if self.opponent_rl_policy is not None and self.prev_obs_dict is not None:
                     opp_steer, opp_speed = self._get_rl_opponent_action(i)
                     all_actions[i] = [opp_steer, opp_speed]
-                elif (
-                    self.opponent_controller is not None
-                    and self.prev_obs_dict is not None
-                ):
-                    opp_steer, opp_speed = self.opponent_controller.get_action(
-                        self.prev_obs_dict, ego_idx=i
-                    )
+                elif self.opponent_controller is not None and self.prev_obs_dict is not None:
+                    opp_steer, opp_speed = self.opponent_controller.get_action(self.prev_obs_dict, ego_idx=i)
                     all_actions[i] = [opp_steer, opp_speed]
                 else:
                     all_actions[i] = [0.0, 1.0]
@@ -614,9 +531,7 @@ class F1TenthWrapper(gym.Env):
         reset_options = dict(options) if options else {}
         start_cfg = self.config["env"].get("start_pose", None)
         if start_cfg is not None and "poses" not in reset_options:
-            reset_options["poses"] = np.array(
-                [start_cfg] * self.num_agents, dtype=np.float64
-            )
+            reset_options["poses"] = np.array([start_cfg] * self.num_agents, dtype=np.float64)
 
         if reset_options:
             raw_obs, info = self.base_env.reset(seed=seed, options=reset_options)
@@ -632,7 +547,7 @@ class F1TenthWrapper(gym.Env):
         self.reward_fn.reset(flat_obs, self.ego_idx)
         if self.actuator_model is not None:
             self.actuator_model.reset()
-
+        
         # Reset frequency counters
         self.lidar_steps_since_update = 0
         self.control_steps_since_update = 0
@@ -650,19 +565,18 @@ class F1TenthWrapper(gym.Env):
 
         # Apply actuator model correction if available
         if self.actuator_model is not None and self.prev_obs_dict is not None:
-            ego_speed = float(self.prev_obs_dict["linear_vels_x"][self.ego_idx])
-            ego_yaw_rate = float(self.prev_obs_dict["ang_vels_z"][self.ego_idx])
+            ego_speed       = float(self.prev_obs_dict["linear_vels_x"][self.ego_idx])
+            ego_yaw_rate    = float(self.prev_obs_dict["ang_vels_z"][self.ego_idx])
+            ego_lateral_vel = float(self.prev_obs_dict["linear_vels_y"][self.ego_idx])
             cmd_steer = physical_action[self.ego_idx, 0]
-            predicted_yaw_rate, predicted_speed = self.actuator_model.predict(
-                cmd_steer, ego_speed, ego_yaw_rate
-            )
+            cmd_spd   = physical_action[self.ego_idx, 1]
+            predicted_yaw_rate, predicted_lateral_vel = self.actuator_model.predict(
+                cmd_steer, ego_speed, ego_yaw_rate, ego_lateral_vel, cmd_spd)
         else:
-            predicted_yaw_rate = None
-            predicted_speed = None
-
-        raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(
-            physical_action
-        )
+            predicted_yaw_rate    = None
+            predicted_lateral_vel = None
+        
+        raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(physical_action)
         self.current_step += 1
 
         # Update curriculum if enabled
@@ -673,18 +587,18 @@ class F1TenthWrapper(gym.Env):
 
         flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
 
-        # Inject actuator model's predicted yaw rate and speed so the RL policy
-        # observes actuator-corrected dynamics rather than raw simulator values.
+        # Inject actuator model predictions so the RL policy observes
+        # corrected dynamics rather than raw simulator values.
         if predicted_yaw_rate is not None:
             flat_obs["ang_vels_z"] = flat_obs["ang_vels_z"].copy()
             flat_obs["ang_vels_z"][self.ego_idx] = predicted_yaw_rate
-        if predicted_speed is not None:
-            flat_obs["linear_vels_x"] = flat_obs["linear_vels_x"].copy()
-            flat_obs["linear_vels_x"][self.ego_idx] = predicted_speed
-
+        if predicted_lateral_vel is not None:
+            flat_obs["linear_vels_y"] = flat_obs["linear_vels_y"].copy()
+            flat_obs["linear_vels_y"][self.ego_idx] = predicted_lateral_vel
+        
         # Apply lidar frequency management (cache stale lidar if needed)
         flat_obs = self._apply_lidar_frequency(flat_obs)
-
+        
         self.prev_obs_dict = flat_obs
 
         ego_collision = bool(flat_obs["collisions"][self.ego_idx])
@@ -694,35 +608,29 @@ class F1TenthWrapper(gym.Env):
         truncated = self.current_step >= self.max_steps
 
         reward = self.reward_fn.compute(
-            obs_dict=flat_obs,
-            ego_idx=self.ego_idx,
+            obs_dict=flat_obs, ego_idx=self.ego_idx,
             action=physical_action[self.ego_idx],
             prev_action=prev_physical_action,  # Use the ACTUAL previous action
-            terminated=terminated,
-            collision=ego_collision,
+            terminated=terminated, collision=ego_collision,
             lap_complete=(ego_lap_count >= num_laps),
         )
 
         observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
-        info.update(
-            {
-                "raw_obs": flat_obs,
-                "ego_collision": ego_collision,
-                "ego_speed": float(flat_obs["linear_vels_x"][self.ego_idx]),
-                "ego_lap_count": ego_lap_count,
-                "ego_lap_time": float(flat_obs["lap_times"][self.ego_idx]),
-                "progress": self.reward_fn.get_progress(),
-                "step": self.current_step,
-                "physical_action": physical_action[self.ego_idx].copy(),
-                "predicted_yaw_rate": predicted_yaw_rate,
-                "predicted_speed": predicted_speed,
-            }
-        )
-
+        info.update({
+            "raw_obs": flat_obs,
+            "ego_collision": ego_collision,
+            "ego_speed": float(flat_obs["linear_vels_x"][self.ego_idx]),
+            "ego_lap_count": ego_lap_count,
+            "ego_lap_time": float(flat_obs["lap_times"][self.ego_idx]),
+            "progress": self.reward_fn.get_progress(),
+            "step": self.current_step,
+            "physical_action": physical_action[self.ego_idx].copy(),
+        })
+        
         # Add curriculum info to logs if enabled
         if self.curriculum is not None:
             info.update(self.curriculum.get_phase_info())
-
+        
         return observation, float(reward), terminated, truncated, info
 
     def render(self):
@@ -745,7 +653,6 @@ class F1TenthWrapper(gym.Env):
             act_dim = self.action_space.shape[0]
             from stable_baselines3.common.policies import ActorCriticPolicy
             import gymnasium as gym
-
             self.opponent_rl_policy = ActorCriticPolicy(
                 observation_space=self.observation_space,
                 action_space=self.action_space,
@@ -760,21 +667,15 @@ class F1TenthWrapper(gym.Env):
     def _get_rl_opponent_action(self, agent_idx: int):
         """Get action from frozen RL opponent policy."""
         import torch
-
         try:
-            obs = self.obs_builder.build(
-                self.prev_obs_dict,
-                ego_idx=agent_idx,
-                prev_action=np.zeros(2, dtype=np.float32),
-            )
+            obs = self.obs_builder.build(self.prev_obs_dict, ego_idx=agent_idx,
+                                          prev_action=np.zeros(2, dtype=np.float32))
             obs_t = torch.FloatTensor(obs).unsqueeze(0)
             with torch.no_grad():
                 action = self.opponent_rl_policy._predict(obs_t, deterministic=True)
             action = action.cpu().numpy().squeeze()
             steer = float(action[0]) * self.max_steer
-            speed = (float(action[1]) + 1.0) * 0.5 * (
-                self.max_speed - self.min_speed
-            ) + self.min_speed
+            speed = (float(action[1]) + 1.0) * 0.5 * (self.max_speed - self.min_speed) + self.min_speed
             return steer, speed
         except Exception:
             return 0.0, 1.0
@@ -783,7 +684,6 @@ class F1TenthWrapper(gym.Env):
 # ============================================================
 # Factory functions
 # ============================================================
-
 
 def make_env(config, rank=0, seed=0, render_mode=None) -> Callable:
     def _init():
@@ -805,7 +705,6 @@ def make_env(config, rank=0, seed=0, render_mode=None) -> Callable:
         env = gym.wrappers.RecordEpisodeStatistics(env)
 
         return env
-
     return _init
 
 
@@ -817,9 +716,7 @@ def make_vec_env(config, n_envs=None, seed=0, normalize=True):
         n_envs = config["env"].get("num_envs", 8)
 
     if n_envs > 1:
-        vec_env = SubprocVecEnv(
-            [make_env(config, rank=i, seed=seed) for i in range(n_envs)]
-        )
+        vec_env = SubprocVecEnv([make_env(config, rank=i, seed=seed) for i in range(n_envs)])
     else:
         vec_env = DummyVecEnv([make_env(config, rank=0, seed=seed)])
 
@@ -835,8 +732,6 @@ def make_vec_env(config, n_envs=None, seed=0, normalize=True):
         # real sensor distributions, causing jerky control on hardware.
         # norm_reward=True: reward normalization helps training stability
         # and doesn't affect deployment.
-        vec_env = VecNormalize(
-            vec_env, norm_obs=False, norm_reward=True, clip_obs=10.0, gamma=gamma
-        )
+        vec_env = VecNormalize(vec_env, norm_obs=False, norm_reward=True, clip_obs=10.0, gamma=gamma)
 
     return vec_env

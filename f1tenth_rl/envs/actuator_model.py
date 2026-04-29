@@ -32,15 +32,20 @@ except ImportError:
 
 class ActuatorNet(nn.Module):
     """
-    Predicts actual vehicle yaw_rate[t+1] from history of
-    (cmd_steering, actual_yaw_rate, actual_speed) tuples.
+    Dynamics net: predicts [yaw_rate[t+1], lateral_vel[t+1]] from:
+      - cmd_steering[t]                              (current command)
+      - history_steps x (cmd_steer, yaw_rate,
+                         speed, lateral_vel)[t-h]   (4 cols per past step)
 
-    Input: concatenated history of steering commands + state
-    Output: predicted actual yaw_rate
+    Input dim  : 1 + history_steps * 4
+    Output dim : 2  → [yaw_rate, lateral_vel]
+
+    lateral_vel captures tyre-slip dynamics missing from yaw_rate alone,
+    and including the current cmd ensures the model learns how commands
+    drive the next state rather than just autocorrelating past state.
     """
     def __init__(self, in_dim: int, hidden_dims: list = None):
         super().__init__()
-        # FIX: accept configurable hidden dims to match train_server architecture
         if hidden_dims is None:
             hidden_dims = [64, 64, 32]
         layers = []
@@ -48,7 +53,7 @@ class ActuatorNet(nn.Module):
         for h in hidden_dims:
             layers += [nn.Linear(prev, h), nn.ELU()]
             prev = h
-        layers.append(nn.Linear(prev, 2))  # 2 outputs: yaw_rate, speed
+        layers.append(nn.Linear(prev, 2))  # [yaw_rate, lateral_vel]
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -84,9 +89,13 @@ class ActuatorModel:
 
         self.device = device
         self.history_steps = history_steps
-        self.feature_dim = history_steps * 3  # cmd_steer, yaw_rate, speed per step (past steps only)
-        # Buffer holds one extra slot (current step) that is shifted out before inference
-        self._buffer_dim = (history_steps + 1) * 3
+        # 5 state features per past step: (cmd_steer, yaw_rate, speed, lateral_vel, slip_angle)
+        # Plus 2 current commands at t: (cmd_steering, cmd_speed)
+        # Total input = 2 + history_steps * 5
+        self._cols_per_step = 5
+        self.feature_dim = 2 + history_steps * self._cols_per_step
+        # Buffer holds (history_steps+1) slots of 5 cols; slot 0 = current (excluded from input)
+        self._buffer_dim = (history_steps + 1) * self._cols_per_step
 
         # Load model
         try:
@@ -110,7 +119,7 @@ class ActuatorModel:
         if scaler_y_path and Path(scaler_y_path).exists():
             self.scaler_y = joblib.load(scaler_y_path)
 
-        # State history buffer (history_steps+1 slots; slot 0 = current, slots 1.. = past)
+        # State history buffer (history_steps+1 slots of 5 cols; slot 0 = current)
         self.history = np.zeros(self._buffer_dim, dtype=np.float32)
 
     @classmethod
@@ -140,47 +149,48 @@ class ActuatorModel:
         cmd_steering: float,
         actual_speed: float,
         actual_yaw_rate: float,
+        actual_lateral_vel: float = 0.0,
+        cmd_speed: float = 0.0,
     ) -> tuple:
         """
-        Predict actual (yaw_rate, speed) given command and recent history.
+        Predict (yaw_rate[t+1], lateral_vel[t+1]) from current commands + history.
 
         Args:
-            cmd_steering: commanded steering angle [-max_steer, max_steer]
-            actual_speed: current velocity (m/s)
-            actual_yaw_rate: current yaw rate (rad/s)
+            cmd_steering:       commanded steering angle (rad)
+            actual_speed:       current longitudinal velocity (m/s)
+            actual_yaw_rate:    current yaw rate (rad/s)
+            actual_lateral_vel: current lateral slip velocity (m/s); 0.0 for old sims
+            cmd_speed:          commanded speed (m/s); 0.0 default for old callers
 
         Returns:
-            (predicted_yaw_rate, predicted_speed) at the next timestep
+            (predicted_yaw_rate, predicted_lateral_vel)
         """
-        # Shift history and add current sample at front.
-        # Training uses h in range(1, history+1), meaning features are
-        # [t-1, t-2, ..., t-history] (never the current step t).
-        # So at inference we skip history[:3] (current step) and use history[3:].
-        self.history = np.roll(self.history, 3)
-        self.history[:3] = [cmd_steering, actual_yaw_rate, actual_speed]
+        import math
+        cols = self._cols_per_step  # 5
+        slip = math.atan2(actual_lateral_vel, actual_speed + 1e-6)
 
-        # Use history[3:] to match training (excludes current step at [:3])
-        x = self.history[3:].reshape(1, -1).astype(np.float32)
+        # Shift buffer right, insert current observation at front slot
+        self.history = np.roll(self.history, cols)
+        self.history[:cols] = [cmd_steering, actual_yaw_rate, actual_speed,
+                               actual_lateral_vel, slip]
+
+        # Feature: [cmd_steering[t], cmd_speed[t]] + history[cols:]  (skip slot 0)
+        x = np.concatenate([[cmd_steering, cmd_speed],
+                            self.history[cols:]]).reshape(1, -1).astype(np.float32)
         if self.scaler_X is not None:
             x = self.scaler_X.transform(x).astype(np.float32)
 
-        # Predict — model outputs shape (1, 2): [yaw_rate, speed]
         with torch.no_grad():
-            x_t = torch.from_numpy(x).to(self.device)
-            y_pred_t = self.model(x_t)
-            y_pred = y_pred_t.cpu().numpy()  # shape (1, 2)
+            y_pred = self.model(torch.from_numpy(x).to(self.device)).cpu().numpy()
 
-        # Inverse-scale if needed
         if self.scaler_y is not None:
-            y_pred = self.scaler_y.inverse_transform(y_pred)  # shape (1, 2)
+            y_pred = self.scaler_y.inverse_transform(y_pred)
 
-        predicted_yaw_rate = float(y_pred[0, 0])
-        predicted_speed    = float(y_pred[0, 1])
-        return predicted_yaw_rate, predicted_speed
+        return float(y_pred[0, 0]), float(y_pred[0, 1])
 
     def reset(self):
         """Reset history for new episode."""
-        self.history.fill(0.0)  # zeros entire buffer including the current-step slot
+        self.history.fill(0.0)
 
 
 class CurriculumScheduler:
