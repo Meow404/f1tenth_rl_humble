@@ -88,6 +88,7 @@ class ObservationBuilder:
         self.include_yaw_rate = config.get("include_yaw_rate", True)
         self.include_steering = config.get("include_steering", False)
         self.include_prev_action = config.get("include_prev_action", True)
+        self.include_wall_threshold = config.get("include_wall_threshold", False)
 
         # Waypoint features
         self.num_waypoints = config.get("num_waypoints", 5)
@@ -121,6 +122,10 @@ class ObservationBuilder:
         # Previous action
         if self.include_prev_action:
             dim += 2
+
+        # Wall proximity threshold
+        if self.include_wall_threshold:
+            dim += 1
 
         # Waypoint features (relative distance, heading error per waypoint)
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:
@@ -168,6 +173,7 @@ class ObservationBuilder:
         obs_dict: Dict[str, Any],
         ego_idx: int = 0,
         prev_action: Optional[np.ndarray] = None,
+        wall_proximity_threshold: Optional[float] = None,
     ) -> np.ndarray:
         """
         Build a flat observation vector from raw F1TENTH observations.
@@ -222,6 +228,12 @@ class ObservationBuilder:
                 components.append(prev_action.astype(np.float32))
             else:
                 components.append(np.zeros(2, dtype=np.float32))
+
+        # ---- Wall proximity threshold ----
+        if self.include_wall_threshold:
+            threshold = wall_proximity_threshold if wall_proximity_threshold is not None else 0.5
+            # Normalize to roughly [-1, 1] around 0.5 baseline
+            components.append(np.array([(threshold - 0.5) / 0.3], dtype=np.float32))
 
         # ---- Waypoint features ----
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:

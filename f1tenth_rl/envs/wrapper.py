@@ -638,7 +638,7 @@ class F1TenthWrapper(gym.Env):
         self.control_steps_since_update = 0
         self.cached_lidar_scan = flat_obs["scans"]
 
-        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
+        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action, wall_proximity_threshold=self.reward_fn.wall_proximity_threshold)
         info["raw_obs"] = flat_obs
         return observation, info
 
@@ -703,7 +703,7 @@ class F1TenthWrapper(gym.Env):
             lap_complete=(ego_lap_count >= num_laps),
         )
 
-        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
+        observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action, wall_proximity_threshold=self.reward_fn.wall_proximity_threshold)
         info.update(
             {
                 "raw_obs": flat_obs,
@@ -766,6 +766,7 @@ class F1TenthWrapper(gym.Env):
                 self.prev_obs_dict,
                 ego_idx=agent_idx,
                 prev_action=np.zeros(2, dtype=np.float32),
+                wall_proximity_threshold=self.reward_fn.wall_proximity_threshold,
             )
             obs_t = torch.FloatTensor(obs).unsqueeze(0)
             with torch.no_grad():

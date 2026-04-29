@@ -95,6 +95,8 @@ def parse_args():
                         help="Path to joblib StandardScaler for actuator model inputs")
     parser.add_argument("--actuator-scaler-y", type=str, default=None,
                         help="Path to joblib StandardScaler for actuator model outputs")
+    parser.add_argument("--actuator-history", type=int, default=None,
+                        help="Number of history steps the actuator model was trained with")
 
     # Curriculum learning: progressive speed & safety margin scaling
     parser.add_argument("--curriculum", action="store_true",
@@ -185,6 +187,8 @@ def apply_overrides(config, args):
             config["actuator_model"]["scaler_X_path"] = args.actuator_scaler_X
         if args.actuator_scaler_y:
             config["actuator_model"]["scaler_y_path"] = args.actuator_scaler_y
+        if args.actuator_history:
+            config["actuator_model"]["history_steps"] = args.actuator_history
 
     # Curriculum learning
     if args.curriculum:

@@ -65,10 +65,11 @@ observation:
   include_steering: false
   include_prev_action: true
   frame_stack: 1 # Don't stack frames — timing differs on real car
+  include_wall_threshold: true
 
 action:
   type: "continuous"
-  max_speed: 3.0 # Conservative for real car. Increase after it works.
+  max_speed: 2.0 # Conservative for real car. Increase after it works.
   min_speed: 0.5
   max_steer: 0.4189
   smoothing_alpha: 0.3 # Heavy smoothing prevents servo jitter on real car
