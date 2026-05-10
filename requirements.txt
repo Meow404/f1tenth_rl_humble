@@ -24,6 +24,10 @@ matplotlib>=3.7.0
 tqdm>=4.65.0
 rich>=13.0.0
 
+# Offline actuator model artifacts (scalers/meta are joblib pickles, often sklearn objects)
+joblib>=1.3.0
+scikit-learn>=1.3.0
+
 # Image processing (for map utilities and video recording)
 Pillow>=9.5.0
 scikit-image>=0.21.0

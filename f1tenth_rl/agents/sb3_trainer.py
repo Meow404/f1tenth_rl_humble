@@ -102,12 +102,7 @@ class SB3Trainer:
         """Create environments and algorithm. Call before train()."""
 
         n_envs = self.config["env"].get("num_envs", 8)
-        self.train_env = make_vec_env(
-            self.config, n_envs=n_envs, seed=self.seed, normalize=True
-        )
-        self.eval_env = make_vec_env(
-            self.config, n_envs=1, seed=self.seed + 1000, normalize=True
-        )
+        self._setup_envs(n_envs=n_envs)
 
         # ---- Algorithm hyperparameters ----
         algo_cfg = self.config["algorithm"].get(self.algo_type, {})
@@ -186,6 +181,123 @@ class SB3Trainer:
         print(f"  Act space:    {self.train_env.action_space.shape}")
         print(f"  WandB:        {self.config['experiment'].get('wandb', False)}")
         print(f"{'='*60}\n")
+
+    def _setup_envs(self, n_envs: int, vecnormalize_path: Optional[str] = None):
+        """(Re)build train/eval envs and optionally load VecNormalize stats.
+
+        Important: when resuming, we must load VecNormalize from the base run so
+        reward-normalization statistics match the checkpoint we are fine-tuning.
+        """
+        # Always start from a *base* vec env without VecNormalize.
+        train_base = make_vec_env(self.config, n_envs=n_envs, seed=self.seed, normalize=False)
+        eval_base = make_vec_env(self.config, n_envs=1, seed=self.seed + 1000, normalize=False)
+
+        algo_type = self.config["algorithm"]["type"]
+        algo_cfg = self.config["algorithm"].get(algo_type, {})
+        gamma = algo_cfg.get("gamma", 0.99) if isinstance(algo_cfg, dict) else 0.99
+
+        if vecnormalize_path and os.path.exists(vecnormalize_path):
+            self.train_env = VecNormalize.load(vecnormalize_path, train_base)
+            self.eval_env = VecNormalize.load(vecnormalize_path, eval_base)
+        else:
+            # Match the defaults in make_vec_env(normalize=True)
+            self.train_env = VecNormalize(train_base, norm_obs=False, norm_reward=True, clip_obs=10.0, gamma=gamma)
+            self.eval_env = VecNormalize(eval_base, norm_obs=False, norm_reward=True, clip_obs=10.0, gamma=gamma)
+
+        # Train env updates running stats; eval env must be frozen.
+        self.train_env.training = True
+        self.train_env.norm_reward = True
+        self.eval_env.training = False
+        self.eval_env.norm_reward = False
+
+    @staticmethod
+    def _resolve_resume_paths(path: str) -> tuple[str, str | None]:
+        """Resolve a resume source to (model_base_path, vecnormalize_path).
+
+        model_base_path: path without .zip extension (SB3 will append .zip as needed).
+        vecnormalize_path: matching VecNormalize pickle path if it exists.
+        """
+        p = Path(path)
+
+        if p.is_dir():
+            model_base = p / "final_model"
+            norm_path = p / "final_vecnormalize.pkl"
+            if norm_path.exists():
+                return str(model_base), str(norm_path)
+
+            # Backward-compat: older runs may not have final_vecnormalize.pkl.
+            # Fall back to the latest checkpoint VecNormalize file if present.
+            ckpt_dir = p / "checkpoints"
+            if ckpt_dir.exists():
+                import re
+
+                best_steps = -1
+                best_norm = None
+                for f in ckpt_dir.glob("*vecnormalize*steps*.pkl"):
+                    m = re.search(r"(\d+)_steps", f.name)
+                    if not m:
+                        continue
+                    steps = int(m.group(1))
+                    if steps > best_steps:
+                        best_steps = steps
+                        best_norm = f
+                if best_norm is not None:
+                    return str(model_base), str(best_norm)
+
+            return str(model_base), None
+
+        # If user passed a .zip, strip it for SB3 + for vecnormalize sibling naming.
+        model_base = p.with_suffix("") if p.suffix == ".zip" else p
+
+        # Common patterns:
+        #   some_model.zip + some_model_vecnormalize.pkl
+        #   checkpoints/model_50000_steps.zip + checkpoints/model_50000_steps_vecnormalize.pkl
+        #   checkpoints/model_50000_steps.zip + checkpoints/model_vecnormalize_50000_steps.pkl  (SB3 CheckpointCallback)
+        import re
+
+        cand = [Path(str(model_base) + "_vecnormalize.pkl")]
+        if p.suffix == ".zip":
+            cand.append(p.parent / f"{p.stem}_vecnormalize.pkl")
+
+            m = re.search(r"_(\d+)_steps$", p.stem)
+            if m:
+                steps = m.group(1)
+                prefix = p.stem.split("_")[0]
+                cand.append(p.parent / f"{prefix}_vecnormalize_{steps}_steps.pkl")
+                cand.append(p.parent / f"vecnormalize_{steps}_steps.pkl")
+
+        for c in cand:
+            if c is not None and c.exists():
+                return str(model_base), str(c)
+
+        # Special-case: resuming from best_model/best_model.zip.
+        # Best-model directory usually doesn't include vecnormalize stats; they live
+        # in the parent run directory (final_vecnormalize.pkl or checkpoints).
+        if p.suffix == ".zip" and p.parent.name == "best_model" and p.parent.parent.exists():
+            run_dir = p.parent.parent
+
+            norm_path = run_dir / "final_vecnormalize.pkl"
+            if norm_path.exists():
+                return str(model_base), str(norm_path)
+
+            ckpt_dir = run_dir / "checkpoints"
+            if ckpt_dir.exists():
+                import re
+
+                best_steps = -1
+                best_norm = None
+                for f in ckpt_dir.glob("*vecnormalize*steps*.pkl"):
+                    m = re.search(r"(\d+)_steps", f.name)
+                    if not m:
+                        continue
+                    steps = int(m.group(1))
+                    if steps > best_steps:
+                        best_steps = steps
+                        best_norm = f
+                if best_norm is not None:
+                    return str(model_base), str(best_norm)
+
+        return str(model_base), None
 
     def _init_wandb(self):
         """Initialize Weights & Biases logging."""
@@ -324,7 +436,9 @@ class SB3Trainer:
         final_model_path = os.path.join(self.run_dir, "final_model")
         self.model.save(final_model_path)
 
-        if isinstance(self.train_env, VecNormalize) and self.train_env.norm_obs:
+        # Save VecNormalize regardless of norm_obs; reward stats are still needed
+        # for consistent fine-tuning/resume.
+        if isinstance(self.train_env, VecNormalize):
             norm_path = os.path.join(self.run_dir, "final_vecnormalize.pkl")
             self.train_env.save(norm_path)
 
@@ -370,29 +484,26 @@ class SB3Trainer:
             yaml.dump(self.config, f, default_flow_style=False)
 
     def load(self, path: str, env=None):
-        """Load a trained model from a run directory or model path."""
+        """Load a trained model from a run directory or checkpoint and prepare for fine-tuning.
+
+        This is primarily used by `scripts/train.py --resume ...`.
+        It ensures VecNormalize statistics match the base model being resumed.
+        """
         AlgoClass = self.ALGORITHMS[self.algo_type]
 
-        # Support loading from run directory
-        run_dir = Path(path)
-        if run_dir.is_dir():
-            model_path = str(run_dir / "final_model")
-            norm_path = str(run_dir / "final_vecnormalize.pkl")
-        else:
-            model_path = path
-            norm_path = path + "_vecnormalize.pkl"
+        model_base, vecnorm = self._resolve_resume_paths(path)
+        n_envs = int(self.config["env"].get("num_envs", 8))
 
-        if env is None:
-            env = make_vec_env(self.config, n_envs=1, seed=self.seed, normalize=True)
+        # If caller didn't provide an env, rebuild our train/eval envs.
+        # (We intentionally ignore a provided env here for simplicity; training
+        # should always use the trainer-managed envs.)
+        self._setup_envs(n_envs=n_envs, vecnormalize_path=vecnorm)
 
-        if os.path.exists(norm_path):
-            env = VecNormalize.load(norm_path, env)
-            env.training = False
-            env.norm_reward = False
-
-        self.model = AlgoClass.load(model_path, env=env, device=self.device)
-        self.eval_env = env
-        print(f"  Loaded model from {model_path}")
+        # Load model weights into the *training* env so learn() continues correctly.
+        self.model = AlgoClass.load(model_base, env=self.train_env, device=self.device)
+        print(f"  Resumed model from {model_base}.zip" if not str(model_base).endswith(".zip") else f"  Resumed model from {model_base}")
+        if vecnorm:
+            print(f"  Loaded VecNormalize stats from {vecnorm}")
 
     def predict(self, obs: np.ndarray, deterministic: bool = True):
         """Get action from trained model."""

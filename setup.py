@@ -11,6 +11,8 @@ setup(
         "scipy>=1.10.0",
         "PyYAML>=6.0",
         "gymnasium>=0.28.0",
+        "joblib>=1.3.0",
+        "scikit-learn>=1.3.0",
         "torch>=2.0.0",
         "stable-baselines3[extra]>=2.1.0",
         "tensorboard>=2.14.0",

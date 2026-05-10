@@ -183,12 +183,38 @@ def apply_overrides(config, args):
         if "actuator_model" not in config:
             config["actuator_model"] = {}
         config["actuator_model"]["model_path"] = args.actuator_model
+
+        # Prefer explicit CLI flags, otherwise auto-detect from the model directory.
+        model_dir = Path(args.actuator_model).expanduser().resolve().parent
         if args.actuator_scaler_X:
             config["actuator_model"]["scaler_X_path"] = args.actuator_scaler_X
+        else:
+            auto_x = model_dir / "scaler_X.pkl"
+            if auto_x.exists():
+                config["actuator_model"]["scaler_X_path"] = str(auto_x)
+
         if args.actuator_scaler_y:
             config["actuator_model"]["scaler_y_path"] = args.actuator_scaler_y
+        else:
+            auto_y = model_dir / "scaler_y.pkl"
+            if auto_y.exists():
+                config["actuator_model"]["scaler_y_path"] = str(auto_y)
+
         if args.actuator_history:
             config["actuator_model"]["history_steps"] = args.actuator_history
+        else:
+            # If present, use actuator_net_meta.pkl so history_steps matches training.
+            meta = model_dir / "actuator_net_meta.pkl"
+            if meta.exists():
+                try:
+                    import joblib
+
+                    meta_obj = joblib.load(meta)
+                    hs = meta_obj.get("history_steps", None) if isinstance(meta_obj, dict) else None
+                    if hs is not None:
+                        config["actuator_model"]["history_steps"] = int(hs)
+                except Exception:
+                    pass
 
     # Curriculum learning
     if args.curriculum:
@@ -269,16 +295,19 @@ def main():
         from f1tenth_rl.agents.sb3_trainer import SB3Trainer
 
         trainer = SB3Trainer(config)
-        trainer.setup()
+
+        # If resuming, load the base checkpoint first so VecNormalize statistics
+        # match the base run during fine-tuning.
+        if args.resume:
+            trainer.load(args.resume)
+        else:
+            trainer.setup()
 
         # Initialize from BC if available
         if bc_path:
             from f1tenth_rl.agents.imitation import ImitationTrainer
             il = ImitationTrainer(config)
             il.init_sb3_from_bc(trainer.model, os.path.join(bc_path, "bc_model"))
-
-        if args.resume:
-            trainer.load(args.resume)
 
         trainer.train()
         trainer.close()

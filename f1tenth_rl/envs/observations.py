@@ -88,6 +88,8 @@ class ObservationBuilder:
         self.include_yaw_rate = config.get("include_yaw_rate", True)
         self.include_steering = config.get("include_steering", False)
         self.include_prev_action = config.get("include_prev_action", True)
+        self.include_wall_threshold = config.get("include_wall_threshold", False)
+        self.default_wall_threshold = config.get("default_wall_threshold", 0.0)
 
         # Waypoint features
         self.num_waypoints = config.get("num_waypoints", 5)
@@ -125,6 +127,10 @@ class ObservationBuilder:
         # Waypoint features (relative distance, heading error per waypoint)
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:
             dim += self.num_waypoints * 2  # (distance, heading_error) per waypoint
+
+        # Wall threshold feature
+        if self.include_wall_threshold:
+            dim += 1
 
         # Frame stacking multiplies the dimension
         dim *= self.frame_stack
@@ -227,6 +233,11 @@ class ObservationBuilder:
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:
             wp_features = self._compute_waypoint_features(obs_dict, ego_idx)
             components.append(wp_features)
+        
+        # ---- Wall threshold feature ----
+        if self.include_wall_threshold:
+            self.default_wall_threshold = float(obs_dict.get("wall_thresholds", [self.default_wall_threshold])[ego_idx])
+            components.append(np.array([self.default_wall_threshold], dtype=np.float32))
 
         # Concatenate all components
         obs = np.concatenate(components).astype(np.float32)
