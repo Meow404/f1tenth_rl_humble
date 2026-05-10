@@ -32,7 +32,9 @@ from gymnasium import spaces
 import numpy as np
 import os
 import shutil
+import yaml
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional, Dict, Any, Callable, Tuple
 
 from f1tenth_rl.envs.observations import ObservationBuilder
@@ -171,6 +173,62 @@ def _generate_centerline(yaml_path: Path, output_path: Path):
     print(f"  [Map] Generated centerline: {len(result)} points -> {output_path.name}")
 
 
+def _load_track_direct(map_source: str, track_scale: float = 1.0):
+    """Load local map YAML/image directly, avoiding TrackSpec accessor issues."""
+    from PIL import Image
+    from f1tenth_gym.envs.track import Track, Raceline
+
+    path = Path(map_source)
+    yaml_path = path.parent / f"{path.stem}_map.yaml"
+    if not yaml_path.exists():
+        yaml_path = path.parent / f"{path.stem}.yaml"
+
+    with yaml_path.open() as f:
+        meta = yaml.safe_load(f)
+
+    image_path = yaml_path.parent / Path(meta["image"]).name
+    flip_op = getattr(Image, "Transpose", Image).FLIP_TOP_BOTTOM
+    image = Image.open(image_path).transpose(flip_op)
+    occupancy_map = np.array(image).astype(np.float32)
+    occupancy_map[occupancy_map <= 128] = 0.0
+    occupancy_map[occupancy_map > 128] = 255.0
+
+    centerline_path = path.parent / f"{path.stem}_centerline.csv"
+    raceline_path = path.parent / f"{path.stem}_raceline.csv"
+    centerline = (
+        Raceline.from_centerline_file(centerline_path, track_scale=track_scale)
+        if centerline_path.exists()
+        else None
+    )
+    raceline = (
+        Raceline.from_raceline_file(raceline_path, track_scale=track_scale)
+        if raceline_path.exists()
+        else centerline
+    )
+    if centerline is None:
+        centerline = raceline
+
+    origin = tuple(meta.get("origin", [0.0, 0.0, 0.0]))
+    spec = SimpleNamespace(
+        name=path.stem,
+        image=meta["image"],
+        resolution=float(meta.get("resolution", 0.05)) * track_scale,
+        origin=(origin[0] * track_scale, origin[1] * track_scale, origin[2]),
+        negate=int(meta.get("negate", 0)),
+        occupied_thresh=float(meta.get("occupied_thresh", 0.65)),
+        free_thresh=float(meta.get("free_thresh", 0.196)),
+    )
+
+    return Track(
+        spec=spec,
+        filepath=str(yaml_path.absolute()),
+        ext=image_path.suffix,
+        occupancy_map=occupancy_map,
+        centerline=centerline,
+        raceline=raceline,
+    )
+
+
 # ============================================================
 # Waypoint extraction from Track object
 # ============================================================
@@ -250,6 +308,7 @@ class F1TenthWrapper(gym.Env):
         self.cached_obs = None
         self.lidar_steps_since_update = 0
         self.control_steps_since_update = 0
+        self._cached_physical_action = None
         self.base_env = self._create_base_env(env_cfg, render_mode)
 
         # ---- Extract waypoints from Track ----
@@ -308,6 +367,7 @@ class F1TenthWrapper(gym.Env):
         self.actuator_model = ActuatorModel.from_env(config)
         if self.actuator_model is not None:
             print(f"  [ActuatorModel] Loaded from config")
+        self._actuator_writeback_status: Optional[bool] = None
 
         # ---- Curriculum learning (optional) ----
         self.curriculum = None
@@ -399,6 +459,8 @@ class F1TenthWrapper(gym.Env):
             env_cfg.get("integrator", "rk4").lower(), IntegratorType.RK4
         )
         map_source = _resolve_map_files(env_cfg["map_path"])
+        if "/" in str(map_source) or "\\" in str(map_source):
+            map_source = _load_track_direct(map_source, track_scale=env_cfg.get("map_scale", 1.0))
 
         # Read lidar hardware config
         lidar_cfg = self.config.get("lidar", {})
@@ -552,6 +614,7 @@ class F1TenthWrapper(gym.Env):
         self.lidar_steps_since_update = 0
         self.control_steps_since_update = 0
         self.cached_lidar_scan = flat_obs["scans"]
+        self._cached_physical_action = None
 
         observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
         info["raw_obs"] = flat_obs
@@ -561,23 +624,118 @@ class F1TenthWrapper(gym.Env):
         # Save previous action BEFORE _scale_action updates it
         prev_physical_action = self.prev_action.copy()
 
-        physical_action = self._scale_action(action)
+        # ---- Control loop frequency management ----
+        #
+        # Physics always advances at env.timestep (base_freq_hz = 1/timestep).
+        # If control_freq_hz is set (< base_freq_hz), we HOLD the last
+        # physical action for multiple physics steps and only update it every
+        # control_update_steps.
+        if self.control_freq_hz > 0 and self.control_update_steps > 1:
+            self.control_steps_since_update += 1
+            if self._cached_physical_action is None or self.control_steps_since_update >= self.control_update_steps:
+                physical_action = self._scale_action(action)
+                self._cached_physical_action = physical_action.copy()
+                self.control_steps_since_update = 0
+            else:
+                physical_action = self._cached_physical_action
+        else:
+            physical_action = self._scale_action(action)
 
-        # Apply actuator model correction if available
+        # ── Actuator model: full sim-state writeback ──────────────────────────
+        #
+        # Previous approach: inject corrected speed/yaw_rate only into the
+        # observation dict AFTER env.step().  Problem: the sim's internal
+        # physics state (position, heading) kept evolving with idealized
+        # dynamics, so the lidar scan was still from a "perfect" car.  The
+        # correction affected only 2 of 112 observation dimensions.
+        #
+        # New approach (sim-state writeback):
+        #   1. Run env.step() normally — sim advances one tick.
+        #   2. Ask the actuator model what speed/yaw_rate the real car would
+        #      have produced given the same command.
+        #   3. Write those values BACK into the sim's agent_states array so
+        #      the sim's integrator uses the corrected velocity on the NEXT
+        #      tick — meaning position, heading, and therefore the lidar scan
+        #      all evolve from the corrected state.
+        #   4. Also update the observation dict so the policy sees the
+        #      corrected values immediately this step.
+        #
+        # agent_states[i] layout (dev-humble):
+        #   [0] x          [1] y        [2] steer_angle
+        #   [3] vel        [4] yaw       [5] yaw_rate
+        #   [6] slip_angle
+        #
+        # We write vel (index 3) and yaw_rate (index 5).  We leave x, y, yaw,
+        # steer, and slip_angle alone — those come from the sim's integrator
+        # and we don't want to fight it on position.  The velocity correction
+        # is enough for the lidar to diverge realistically over subsequent steps.
+        #
+        # Warm-up: for the first history_steps steps of each episode the
+        # history buffer is filling up with zeros, so we advance the buffer
+        # but suppress the writeback.
+
+        _actuator_warmed_up = (
+            self.actuator_model is not None
+            and self.actuator_model._steps_since_reset >= self.actuator_model.history_steps
+        )
+
         if self.actuator_model is not None and self.prev_obs_dict is not None:
             ego_speed       = float(self.prev_obs_dict["linear_vels_x"][self.ego_idx])
             ego_yaw_rate    = float(self.prev_obs_dict["ang_vels_z"][self.ego_idx])
             ego_lateral_vel = float(self.prev_obs_dict["linear_vels_y"][self.ego_idx])
             cmd_steer = physical_action[self.ego_idx, 0]
             cmd_spd   = physical_action[self.ego_idx, 1]
-            predicted_yaw_rate, predicted_lateral_vel = self.actuator_model.predict(
+            predicted_speed, predicted_yaw_rate, predicted_lateral_vel = self.actuator_model.predict(
                 cmd_steer, ego_speed, ego_yaw_rate, ego_lateral_vel, cmd_spd)
         else:
+            predicted_speed       = None
             predicted_yaw_rate    = None
             predicted_lateral_vel = None
-        
+
         raw_obs, base_reward, done, truncated_flag, info = self.base_env.step(physical_action)
         self.current_step += 1
+
+        # ── Write corrected velocity back into the sim state ─────────────────
+        if _actuator_warmed_up and predicted_speed is not None:
+            try:
+                sim = self.base_env.unwrapped.sim
+                import math
+                slip = math.atan2(predicted_lateral_vel, predicted_speed + 1e-6)
+
+                # f1tenth_gym (dev-humble) stores live state in sim.state.state
+                # for the ST model: [X, Y, DELTA, V, PSI, PSI_DOT, BETA]
+                if hasattr(sim, "state") and hasattr(sim.state, "state"):
+                    st = sim.state.state
+                    st[self.ego_idx, 3] = predicted_speed       # V
+                    st[self.ego_idx, 5] = predicted_yaw_rate    # PSI_DOT
+                    st[self.ego_idx, 6] = slip                  # BETA (slip angle)
+                    if hasattr(sim.state, "standard_state"):
+                        # For ST, standardized state is identity, but keep in sync.
+                        sim.state.standard_state[self.ego_idx, 3] = predicted_speed
+                        sim.state.standard_state[self.ego_idx, 5] = predicted_yaw_rate
+                        sim.state.standard_state[self.ego_idx, 6] = slip
+
+                # Legacy fallback (older forks)
+                elif hasattr(sim, "agent_states"):
+                    state = sim.agent_states[self.ego_idx]  # mutable numpy row
+                    state[3] = predicted_speed
+                    state[5] = predicted_yaw_rate
+                    state[6] = slip
+                else:
+                    raise AttributeError("No writable sim state found (expected sim.state.state or sim.agent_states)")
+
+                if self._actuator_writeback_status is not True:
+                    self._actuator_writeback_status = True
+                    print("  [ActuatorModel] Sim-state writeback: ENABLED (sim state patched)")
+            except Exception as e:
+                # Gym version may not expose agent_states as a writable array;
+                # fall through silently to observation-only injection below.
+                if self._actuator_writeback_status is not False:
+                    self._actuator_writeback_status = False
+                    print(
+                        "  [ActuatorModel] Sim-state writeback: DISABLED (failed to patch sim state; lidar/pose will remain idealized)"
+                    )
+                    print(f"  [ActuatorModel] Writeback exception: {type(e).__name__}: {e}")
 
         # Update curriculum if enabled
         if self.curriculum is not None:
@@ -587,12 +745,23 @@ class F1TenthWrapper(gym.Env):
 
         flat_obs = _flatten_obs_to_legacy(raw_obs, self.ego_idx, self.num_agents)
 
-        # Inject actuator model predictions so the RL policy observes
-        # corrected dynamics rather than raw simulator values.
-        if predicted_yaw_rate is not None:
+        # Cache the *ideal* sim-reported next-state before actuator injection.
+        # This lets us measure how much the actuator model deviates from the sim.
+        sim_speed_next = float(flat_obs["linear_vels_x"][self.ego_idx])
+        sim_yaw_rate_next = float(flat_obs["ang_vels_z"][self.ego_idx])
+        sim_lateral_vel_next = float(flat_obs["linear_vels_y"][self.ego_idx])
+
+        # ── Also patch the observation dict for this step ────────────────────
+        # Even though we wrote back to the sim, the raw_obs already came from
+        # env.step() before the writeback, so we still need to patch the
+        # observation the policy sees *right now*.  The sim will use the
+        # corrected state on the NEXT tick automatically.
+        if _actuator_warmed_up and predicted_speed is not None:
+            import math
+            flat_obs["linear_vels_x"] = flat_obs["linear_vels_x"].copy()
+            flat_obs["linear_vels_x"][self.ego_idx] = predicted_speed
             flat_obs["ang_vels_z"] = flat_obs["ang_vels_z"].copy()
             flat_obs["ang_vels_z"][self.ego_idx] = predicted_yaw_rate
-        if predicted_lateral_vel is not None:
             flat_obs["linear_vels_y"] = flat_obs["linear_vels_y"].copy()
             flat_obs["linear_vels_y"][self.ego_idx] = predicted_lateral_vel
         
@@ -625,6 +794,19 @@ class F1TenthWrapper(gym.Env):
             "progress": self.reward_fn.get_progress(),
             "step": self.current_step,
             "physical_action": physical_action[self.ego_idx].copy(),
+            # ---- Actuator diagnostics ----
+            "actuator_enabled": bool(self.actuator_model is not None),
+            "actuator_warmed_up": bool(_actuator_warmed_up),
+            "actuator_writeback_enabled": bool(self._actuator_writeback_status is True),
+            "sim_ego_speed": sim_speed_next,
+            "sim_ego_yaw_rate": sim_yaw_rate_next,
+            "sim_ego_lateral_vel": sim_lateral_vel_next,
+            "actuator_pred_speed": float(predicted_speed) if predicted_speed is not None else None,
+            "actuator_pred_yaw_rate": float(predicted_yaw_rate) if predicted_yaw_rate is not None else None,
+            "actuator_pred_lateral_vel": float(predicted_lateral_vel) if predicted_lateral_vel is not None else None,
+            "actuator_delta_speed": (float(predicted_speed) - sim_speed_next) if predicted_speed is not None else None,
+            "actuator_delta_yaw_rate": (float(predicted_yaw_rate) - sim_yaw_rate_next) if predicted_yaw_rate is not None else None,
+            "actuator_delta_lateral_vel": (float(predicted_lateral_vel) - sim_lateral_vel_next) if predicted_lateral_vel is not None else None,
         })
         
         # Add curriculum info to logs if enabled
