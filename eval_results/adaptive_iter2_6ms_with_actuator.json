@@ -1,0 +1,147 @@
+{
+  "onnx": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth_rl_humble/runs/adaptive_20260510_135216_iter2_2026-05-10_13-52-17/final_model.onnx",
+  "config": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth_rl_humble/configs/sim2real_e2e.yaml",
+  "map": "maps/levine_race2/levine_race2",
+  "actuator_model": {
+    "model_path": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth-project/f1tenth_adaptive_server/offline_actuator_weights/offline_actuator_20260509_202232_vx/actuator_net.pth",
+    "scaler_X_path": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth-project/f1tenth_adaptive_server/offline_actuator_weights/offline_actuator_20260509_202232_vx/scaler_X.pkl",
+    "scaler_y_path": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth-project/f1tenth_adaptive_server/offline_actuator_weights/offline_actuator_20260509_202232_vx/scaler_y.pkl",
+    "history_steps": 15
+  },
+  "onnx_info": {
+    "input_name": "observation",
+    "input_shape": [
+      "batch_size",
+      112
+    ],
+    "outputs": [
+      "action"
+    ]
+  },
+  "episodes": [
+    {
+      "episode": 1,
+      "return": 56.311117139931056,
+      "steps": 114,
+      "progress": 0.14927547506647357,
+      "collision": true,
+      "avg_speed": 3.8987228179021356,
+      "max_speed": 4.712289333343506,
+      "avg_abs_steer": 0.2335913390444036,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 2,
+      "return": 44.56881893048244,
+      "steps": 100,
+      "progress": 0.1283386152018471,
+      "collision": true,
+      "avg_speed": 3.768122590161637,
+      "max_speed": 4.690560817718506,
+      "avg_abs_steer": 0.22591903891414403,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 3,
+      "return": 45.17693403521008,
+      "steps": 101,
+      "progress": 0.1291954658348188,
+      "collision": true,
+      "avg_speed": 3.773530771915248,
+      "max_speed": 4.728710174560547,
+      "avg_abs_steer": 0.21924868539565862,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 4,
+      "return": 45.59269262623149,
+      "steps": 100,
+      "progress": 0.12298968588055545,
+      "collision": true,
+      "avg_speed": 3.7708975497635198,
+      "max_speed": 4.756816387176514,
+      "avg_abs_steer": 0.23269196208566428,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 5,
+      "return": 44.56881893048244,
+      "steps": 100,
+      "progress": 0.1283386152018471,
+      "collision": true,
+      "avg_speed": 3.768122590161637,
+      "max_speed": 4.690560817718506,
+      "avg_abs_steer": 0.22591903891414403,
+      "lap_time": 0.0
+    }
+  ],
+  "summary": {
+    "return": {
+      "mean": 47.2436763324675,
+      "std": 4.550283023291924,
+      "min": 44.56881893048244,
+      "max": 56.311117139931056
+    },
+    "steps": {
+      "mean": 103.0,
+      "std": 5.513619500836088,
+      "min": 100.0,
+      "max": 114.0
+    },
+    "progress": {
+      "mean": 0.1316275714371084,
+      "std": 0.009095176450130948,
+      "min": 0.12298968588055545,
+      "max": 0.14927547506647357
+    },
+    "collision": {
+      "rate": 1.0,
+      "count": 5,
+      "episodes": 5
+    },
+    "avg_speed": {
+      "mean": 3.795879263980835,
+      "std": 0.05146106024756075,
+      "min": 3.768122590161637,
+      "max": 3.8987228179021356
+    },
+    "max_speed": {
+      "mean": 4.715787506103515,
+      "std": 0.02504145869776845,
+      "min": 4.690560817718506,
+      "max": 4.756816387176514
+    },
+    "avg_abs_steer": {
+      "mean": 0.2274740128708029,
+      "std": 0.005237185763522827,
+      "min": 0.21924868539565862,
+      "max": 0.2335913390444036
+    },
+    "lap_time": {
+      "mean": 0.0,
+      "std": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    }
+  },
+  "actuator_diagnostics": {
+    "abs_delta_speed": {
+      "count": 440,
+      "mean_abs": 0.06953950197232736,
+      "std_abs": 0.06517918022384064,
+      "max_abs": 0.657292128380814
+    },
+    "abs_delta_yaw_rate": {
+      "count": 440,
+      "mean_abs": 0.16285509533164175,
+      "std_abs": 0.1798318508687236,
+      "max_abs": 0.9468814730644226
+    },
+    "abs_delta_lateral_vel": {
+      "count": 440,
+      "mean_abs": 0.033451854396072025,
+      "std_abs": 0.02288089164049048,
+      "max_abs": 0.1932230196224726
+    }
+  }
+}

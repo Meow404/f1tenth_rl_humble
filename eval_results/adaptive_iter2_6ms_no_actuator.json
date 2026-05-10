@@ -1,0 +1,122 @@
+{
+  "onnx": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth_rl_humble/runs/adaptive_20260510_135216_iter2_2026-05-10_13-52-17/final_model.onnx",
+  "config": "/home/stfelix/Workspace/ese-6510/f1tenth-online-policy-and-actuator-model-learning/f1tenth_rl_humble/configs/sim2real_e2e.yaml",
+  "map": "maps/levine_race2/levine_race2",
+  "actuator_model": {},
+  "onnx_info": {
+    "input_name": "observation",
+    "input_shape": [
+      "batch_size",
+      112
+    ],
+    "outputs": [
+      "action"
+    ]
+  },
+  "episodes": [
+    {
+      "episode": 1,
+      "return": 54.54052278518539,
+      "steps": 111,
+      "progress": 0.1492754750664736,
+      "collision": true,
+      "avg_speed": 4.04996709111523,
+      "max_speed": 5.8053964434861145,
+      "avg_abs_steer": 0.2260501286400868,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 2,
+      "return": 44.263767247237546,
+      "steps": 101,
+      "progress": 0.13186991076791235,
+      "collision": true,
+      "avg_speed": 3.8857979067898563,
+      "max_speed": 5.800315097709077,
+      "avg_abs_steer": 0.26651670359591445,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 3,
+      "return": 43.72301596313033,
+      "steps": 99,
+      "progress": 0.12566415054115426,
+      "collision": true,
+      "avg_speed": 3.8584027198970086,
+      "max_speed": 5.8468173509976396,
+      "avg_abs_steer": 0.2669012516059659,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 4,
+      "return": 46.286985705566075,
+      "steps": 99,
+      "progress": 0.12298968588055542,
+      "collision": true,
+      "avg_speed": 3.8667437361640555,
+      "max_speed": 5.868850906786538,
+      "avg_abs_steer": 0.26069411854588925,
+      "lap_time": 0.0
+    },
+    {
+      "episode": 5,
+      "return": 44.263767247237546,
+      "steps": 101,
+      "progress": 0.13186991076791235,
+      "collision": true,
+      "avg_speed": 3.8857979067898563,
+      "max_speed": 5.800315097709077,
+      "avg_abs_steer": 0.26651670359591445,
+      "lap_time": 0.0
+    }
+  ],
+  "summary": {
+    "return": {
+      "mean": 46.61561178967138,
+      "std": 4.058119404582559,
+      "min": 43.72301596313033,
+      "max": 54.54052278518539
+    },
+    "steps": {
+      "mean": 102.2,
+      "std": 4.48998886412873,
+      "min": 99.0,
+      "max": 111.0
+    },
+    "progress": {
+      "mean": 0.13233382660480159,
+      "std": 0.009156936530028071,
+      "min": 0.12298968588055542,
+      "max": 0.1492754750664736
+    },
+    "collision": {
+      "rate": 1.0,
+      "count": 5,
+      "episodes": 5
+    },
+    "avg_speed": {
+      "mean": 3.909341872151201,
+      "std": 0.07112452072317753,
+      "min": 3.8584027198970086,
+      "max": 4.04996709111523
+    },
+    "max_speed": {
+      "mean": 5.824338979337689,
+      "std": 0.028283218767296756,
+      "min": 5.800315097709077,
+      "max": 5.868850906786538
+    },
+    "avg_abs_steer": {
+      "mean": 0.25733578119675415,
+      "std": 0.015812320398951026,
+      "min": 0.2260501286400868,
+      "max": 0.2669012516059659
+    },
+    "lap_time": {
+      "mean": 0.0,
+      "std": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    }
+  }
+}

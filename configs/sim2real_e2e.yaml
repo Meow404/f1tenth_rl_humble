@@ -52,8 +52,8 @@ lidar:
   raw_beams: 1080 # Hokuyo UST-10LX
   fov_deg: 270.0
   range_max: 30.0
-  update_freq_hz: 20 # FIX: moved here from duplicate block
-  control_freq_hz: 50 # FIX: moved here from duplicate block
+  update_freq_hz: 15 # FIX: moved here from duplicate block
+  control_freq_hz: 40 # FIX: moved here from duplicate block
 
 observation:
   type: "lidar_state" # Lidar + velocity only — no localization needed
@@ -68,12 +68,12 @@ observation:
 
 action:
   type: "continuous"
-  max_speed: 3.0 # Conservative for real car. Increase after it works.
+  max_speed: 6.0 # Conservative for real car. Increase after it works.
   min_speed: 0.5
   max_steer: 0.4189
   smoothing_alpha: 0.3 # Heavy smoothing prevents servo jitter on real car
-  steer_dead_zone: 0.0 # OFF during training (used on real car only)
-  max_steer_rate: 0.0 # OFF during training (0 = unlimited)
+  steer_dead_zone: 0.01 # OFF during training (used on real car only)
+  max_steer_rate: 0.5 # OFF during training (0 = unlimited)
 
 reward:
   type: "cth" # Cross-track + heading → smoother than "progress"
@@ -89,7 +89,7 @@ reward:
 
 algorithm:
   type: "ppo"
-  total_timesteps: 2_000_000 # For real deployment, use 10M-15M
+  total_timesteps: 15_000_000 # For real deployment, use 10M-15M
   ppo:
     learning_rate: 0.0003
     n_steps: 2048

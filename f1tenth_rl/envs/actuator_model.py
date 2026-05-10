@@ -97,7 +97,7 @@ class ActuatorModel:
         if not TORCH_AVAILABLE:
             raise ImportError("torch required for ActuatorModel. Install: pip install torch")
 
-        self.device = device
+        self.device = self._resolve_device(device)
         self.history_steps = history_steps
 
         cols = self._COLS_PER_STEP
@@ -108,15 +108,16 @@ class ActuatorModel:
 
         # --- Load model ---
         try:
-            self.model = torch.jit.load(model_path, map_location=device)
+            self.model = torch.jit.load(model_path, map_location=self.device)
         except Exception:
-            checkpoint = torch.load(model_path, map_location=device)
+            checkpoint = torch.load(model_path, map_location=self.device)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 hidden_dims = checkpoint.get("hidden_dims", [64, 64, 32])
                 self.model = ActuatorNet(self.feature_dim, hidden_dims)
                 self.model.load_state_dict(checkpoint["model_state_dict"])
             else:
                 self.model = checkpoint
+        self.model.to(self.device)
         self.model.eval()
 
         # --- Validate feature dimension against the loaded model ---
@@ -145,10 +146,20 @@ class ActuatorModel:
         self._history = np.zeros(self._buffer_size, dtype=np.float32)
         self._steps_since_reset = 0
 
+    @staticmethod
+    def _resolve_device(device: str) -> str:
+        """Return a usable torch device string for actuator inference."""
+        if device == "auto":
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        if str(device).startswith("cuda") and not torch.cuda.is_available():
+            warnings.warn("CUDA requested for ActuatorModel but unavailable; using CPU.")
+            return "cpu"
+        return str(device)
+
     def _validate_feature_dim(self, model_path: str) -> None:
         """Probe the model with a zero input to check feature dimension."""
         try:
-            probe = torch.zeros(1, self.feature_dim)
+            probe = torch.zeros(1, self.feature_dim, device=self.device)
             with torch.no_grad():
                 self.model(probe)
         except Exception as e:

@@ -41,13 +41,19 @@ def apply_overrides(config: dict, args: argparse.Namespace) -> dict:
     config["env"]["num_envs"] = 1
     config["experiment"]["device"] = args.device
 
+    if args.max_speed is not None:
+        config.setdefault("action", {})
+        config["action"]["max_speed"] = args.max_speed
+        config.setdefault("expert", {}).setdefault("pure_pursuit", {})
+        config["expert"]["pure_pursuit"]["target_speed"] = args.max_speed
+
     if args.max_steps is not None:
         config["env"]["max_steps"] = args.max_steps
 
     if args.actuator_model:
-        config["actuator_model"]["model_path"] = str(args.actuator_model)
-        config["actuator_model"]["scaler_X_path"] = str(args.actuator_scaler_x)
-        config["actuator_model"]["scaler_y_path"] = str(args.actuator_scaler_y)
+        config["actuator_model"]["model_path"] = str(args.actuator_model.resolve())
+        config["actuator_model"]["scaler_X_path"] = str(args.actuator_scaler_x.resolve())
+        config["actuator_model"]["scaler_y_path"] = str(args.actuator_scaler_y.resolve())
         config["actuator_model"]["history_steps"] = args.actuator_history
     else:
         config.pop("actuator_model", None)
@@ -238,6 +244,7 @@ def main() -> None:
     parser.add_argument("--map", type=str, default="maps/levine_slam/levine_slam")
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--max-speed", type=float, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--sleep", type=float, default=0.0)
@@ -264,6 +271,15 @@ def main() -> None:
     args = parser.parse_args()
 
     from f1tenth_rl.envs.wrapper import F1TenthWrapper
+
+    args.onnx = args.onnx.resolve()
+    args.config = args.config.resolve()
+    if args.out:
+        args.out = args.out.resolve()
+    if args.video:
+        args.video = args.video.resolve()
+    if args.comparison_video:
+        args.comparison_video = args.comparison_video.resolve()
 
     config = apply_overrides(load_config(args.config), args)
     policy, onnx_info = make_onnx_policy(args.onnx)
