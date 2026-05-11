@@ -128,7 +128,7 @@ class ObservationBuilder:
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:
             dim += self.num_waypoints * 2  # (distance, heading_error) per waypoint
 
-        # Wall threshold feature
+        # Backward-compatible scalar used by older sim2real ONNX exports.
         if self.include_wall_threshold:
             dim += 1
 
@@ -233,10 +233,12 @@ class ObservationBuilder:
         if self.obs_type in ["lidar_waypoint", "waypoint_only"]:
             wp_features = self._compute_waypoint_features(obs_dict, ego_idx)
             components.append(wp_features)
-        
+
         # ---- Wall threshold feature ----
         if self.include_wall_threshold:
-            self.default_wall_threshold = float(obs_dict.get("wall_thresholds", [self.default_wall_threshold])[ego_idx])
+            self.default_wall_threshold = float(
+                obs_dict.get("wall_thresholds", [self.default_wall_threshold])[ego_idx]
+            )
             components.append(np.array([self.default_wall_threshold], dtype=np.float32))
 
         # Concatenate all components

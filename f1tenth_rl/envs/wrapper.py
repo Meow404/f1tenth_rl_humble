@@ -285,6 +285,12 @@ class F1TenthWrapper(gym.Env):
         self.max_steps = env_cfg.get("max_steps", 3000)
         self.timestep = env_cfg.get("timestep", 0.01)
 
+        # Direction randomization: if True, each reset picks a random
+        # direction (forward or reverse along the waypoint order) so the
+        # agent doesn't overfit to a single track direction.
+        self.randomize_direction = env_cfg.get("randomize_direction", False)
+        self.reverse_direction = False  # Updated in reset()
+
         self.action_type = act_cfg.get("type", "continuous")
         self.max_speed = act_cfg.get("max_speed", 8.0)
         self.min_speed = act_cfg.get("min_speed", 0.5)
@@ -591,9 +597,40 @@ class F1TenthWrapper(gym.Env):
         super().reset(seed=seed)
 
         reset_options = dict(options) if options else {}
-        start_cfg = self.config["env"].get("start_pose", None)
-        if start_cfg is not None and "poses" not in reset_options:
-            reset_options["poses"] = np.array([start_cfg] * self.num_agents, dtype=np.float64)
+
+        # ---- Direction randomization ----
+        # Each reset picks a random direction and a random starting waypoint
+        # if randomize_direction is enabled. The starting pose's heading is
+        # set to point along (or against) the waypoint order. The reward
+        # function is told the direction so progress is computed correctly.
+        if self.randomize_direction and self.waypoints is not None and len(self.waypoints) > 1:
+            self.reverse_direction = bool(np.random.rand() < 0.5)
+
+            # Pick a random starting waypoint
+            start_idx = int(np.random.randint(len(self.waypoints)))
+            wp = self.waypoints[start_idx]
+            next_idx = (start_idx + 1) % len(self.waypoints)
+            dx = self.waypoints[next_idx][0] - wp[0]
+            dy = self.waypoints[next_idx][1] - wp[1]
+            heading = float(np.arctan2(dy, dx))
+            if self.reverse_direction:
+                heading += np.pi
+
+            start_pose = [float(wp[0]), float(wp[1]), heading]
+            # Replicate for every agent (opponents start at the same spot;
+            # the sim will still place them per its reset strategy if it
+            # rejects collisions). Override only if no explicit poses given.
+            if "poses" not in reset_options:
+                reset_options["poses"] = np.array(
+                    [start_pose] * self.num_agents, dtype=np.float64
+                )
+        else:
+            self.reverse_direction = False
+            start_cfg = self.config["env"].get("start_pose", None)
+            if start_cfg is not None and "poses" not in reset_options:
+                reset_options["poses"] = np.array(
+                    [start_cfg] * self.num_agents, dtype=np.float64
+                )
 
         if reset_options:
             raw_obs, info = self.base_env.reset(seed=seed, options=reset_options)
@@ -606,6 +643,8 @@ class F1TenthWrapper(gym.Env):
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.prev_obs_dict = flat_obs
         self.obs_builder.reset()
+        # Tell the reward function which direction we're going BEFORE reset.
+        self.reward_fn.set_direction(self.reverse_direction)
         self.reward_fn.reset(flat_obs, self.ego_idx)
         if self.actuator_model is not None:
             self.actuator_model.reset()
@@ -618,6 +657,7 @@ class F1TenthWrapper(gym.Env):
 
         observation = self.obs_builder.build(flat_obs, self.ego_idx, self.prev_action)
         info["raw_obs"] = flat_obs
+        info["reverse_direction"] = self.reverse_direction
         return observation, info
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:

@@ -52,6 +52,17 @@ class RewardFunction(ABC):
         self.wall_proximity_penalty = config.get("wall_proximity_penalty", 0.0)
         self.wall_proximity_threshold = config.get("wall_proximity_threshold", 0.5)
         self._progress = 0.0
+        # Direction flag. False = forward (default), True = reverse.
+        # Set via set_direction() before reset().
+        self.reverse_direction = False
+
+    def set_direction(self, reverse: bool):
+        """
+        Tell the reward function which direction the car is going this episode.
+        Call BEFORE reset(). When True, progress and heading references are
+        flipped so the agent is rewarded for driving against waypoint order.
+        """
+        self.reverse_direction = bool(reverse)
 
     def reset(self, obs_dict: Dict, ego_idx: int):
         self._progress = 0.0
@@ -129,6 +140,10 @@ class ProgressReward(RewardFunction):
         elif delta > self.total_length * 0.5:
             delta -= self.total_length
 
+        # Flip sign when running the track in reverse.
+        if self.reverse_direction:
+            delta = -delta
+
         self.prev_progress_dist = current_dist
         self._progress += max(0, delta) / self.total_length
 
@@ -175,7 +190,13 @@ class CTHReward(RewardFunction):
         dists = np.sqrt((self.waypoints[:, 0] - x)**2 + (self.waypoints[:, 1] - y)**2)
         closest = np.argmin(dists)
         crosstrack = dists[closest]
-        heading_err = self._norm_angle(theta - self.wp_headings[closest])
+
+        # Reference heading along the track. Flip 180° if running reverse.
+        ref_heading = self.wp_headings[closest]
+        if self.reverse_direction:
+            ref_heading = self._norm_angle(ref_heading + np.pi)
+
+        heading_err = self._norm_angle(theta - ref_heading)
 
         reward = self.heading_weight * vel * np.cos(heading_err) - self.crosstrack_weight * crosstrack
         self._update_progress(x, y)
@@ -187,6 +208,13 @@ class CTHReward(RewardFunction):
         delta = current_dist - self.prev_progress_dist
         if delta < -self.total_length * 0.5:
             delta += self.total_length
+        elif delta > self.total_length * 0.5:
+            delta -= self.total_length
+
+        # Flip when reverse so positive progress means "going the chosen way".
+        if self.reverse_direction:
+            delta = -delta
+
         self._progress += max(0, delta) / self.total_length
         self.prev_progress_dist = current_dist
 
