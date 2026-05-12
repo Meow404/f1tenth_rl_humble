@@ -224,7 +224,7 @@ class ObservationBuilder:
         # ---- Previous action ----
         if self.include_prev_action:
             if prev_action is not None:
-                # Already in normalized scale
+                # Physical command units: [steer_rad, speed_mps].
                 components.append(prev_action.astype(np.float32))
             else:
                 components.append(np.zeros(2, dtype=np.float32))

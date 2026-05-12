@@ -67,7 +67,7 @@ if ROS2_AVAILABLE:
             self.declare_parameter("model_path", "")
             self.declare_parameter("config_path", "configs/sim2real_e2e.yaml")
             self.declare_parameter("max_speed", 2.0)
-            self.declare_parameter("smoothing_alpha", 0.4)
+            self.declare_parameter("smoothing_alpha", 0.3)
             self.declare_parameter("max_steer_rate", 2.0)      # rad/s
             self.declare_parameter("use_onnx", False)
             self.declare_parameter("inference_rate", 40.0)

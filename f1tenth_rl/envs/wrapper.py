@@ -290,6 +290,9 @@ class F1TenthWrapper(gym.Env):
         # agent doesn't overfit to a single track direction.
         self.randomize_direction = env_cfg.get("randomize_direction", False)
         self.reverse_direction = False  # Updated in reset()
+        start_noise_cfg = env_cfg.get("start_pose_noise", {})
+        self.start_lateral_noise = float(start_noise_cfg.get("lateral_m", 0.0))
+        self.start_heading_noise = float(start_noise_cfg.get("heading_rad", 0.0))
 
         self.action_type = act_cfg.get("type", "continuous")
         self.max_speed = act_cfg.get("max_speed", 8.0)
@@ -302,6 +305,7 @@ class F1TenthWrapper(gym.Env):
         # ---- Lidar and control loop frequency ----
         lidar_cfg = config.get("lidar", {})
         self.lidar_update_freq_hz = lidar_cfg.get("update_freq_hz", 0)
+        self.lidar_update_freq_range = lidar_cfg.get("update_freq_hz_range", None)
         self.control_freq_hz = lidar_cfg.get("control_freq_hz", 0)
         
         # Convert frequencies to steps (how many physics steps between updates)
@@ -501,6 +505,24 @@ class F1TenthWrapper(gym.Env):
 
     # ---- Lidar frequency management ----
 
+    def _reset_lidar_timing(self):
+        """Resample lidar cadence/phase so training sees fresh and stale scans."""
+        base_freq_hz = 1.0 / self.timestep
+        if self.lidar_update_freq_range is not None:
+            low, high = self.lidar_update_freq_range
+            self.lidar_update_freq_hz = float(np.random.uniform(low, high))
+
+        self.lidar_update_steps = (
+            max(1, round(base_freq_hz / self.lidar_update_freq_hz))
+            if self.lidar_update_freq_hz > 0
+            else 1
+        )
+        self.lidar_steps_since_update = (
+            int(np.random.randint(0, self.lidar_update_steps))
+            if self.lidar_update_steps > 1
+            else 0
+        )
+
     def _apply_lidar_frequency(self, flat_obs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Manage lidar update frequency independently from control frequency.
@@ -616,6 +638,15 @@ class F1TenthWrapper(gym.Env):
             if self.reverse_direction:
                 heading += np.pi
 
+            if self.start_lateral_noise > 0:
+                lateral_offset = float(np.random.uniform(-self.start_lateral_noise, self.start_lateral_noise))
+                wp = np.array([
+                    float(wp[0] - np.sin(heading) * lateral_offset),
+                    float(wp[1] + np.cos(heading) * lateral_offset),
+                ])
+            if self.start_heading_noise > 0:
+                heading += float(np.random.uniform(-self.start_heading_noise, self.start_heading_noise))
+
             start_pose = [float(wp[0]), float(wp[1]), heading]
             # Replicate for every agent (opponents start at the same spot;
             # the sim will still place them per its reset strategy if it
@@ -650,7 +681,7 @@ class F1TenthWrapper(gym.Env):
             self.actuator_model.reset()
         
         # Reset frequency counters
-        self.lidar_steps_since_update = 0
+        self._reset_lidar_timing()
         self.control_steps_since_update = 0
         self.cached_lidar_scan = flat_obs["scans"]
         self._cached_physical_action = None
